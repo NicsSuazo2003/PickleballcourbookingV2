@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\nicss\\source\\repos\\PickleballBookingSystem\\PickleballBookingSystem\\PickleballBookingSystem.csproj": {}
+    "C:\\Users\\nicss\\Pickleballcourtbooking\\PickleballBookingSystem.csproj": {}
   },
   "projects": {
-    "C:\\Users\\nicss\\source\\repos\\PickleballBookingSystem\\PickleballBookingSystem\\PickleballBookingSystem.csproj": {
+    "C:\\Users\\nicss\\Pickleballcourtbooking\\PickleballBookingSystem.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\nicss\\source\\repos\\PickleballBookingSystem\\PickleballBookingSystem\\PickleballBookingSystem.csproj",
+        "projectUniqueName": "C:\\Users\\nicss\\Pickleballcourtbooking\\PickleballBookingSystem.csproj",
         "projectName": "PickleballBookingSystem",
-        "projectPath": "C:\\Users\\nicss\\source\\repos\\PickleballBookingSystem\\PickleballBookingSystem\\PickleballBookingSystem.csproj",
+        "projectPath": "C:\\Users\\nicss\\Pickleballcourtbooking\\PickleballBookingSystem.csproj",
         "packagesPath": "C:\\Users\\nicss\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\nicss\\source\\repos\\PickleballBookingSystem\\PickleballBookingSystem\\obj\\",
+        "outputPath": "C:\\Users\\nicss\\Pickleballcourtbooking\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -30,7 +30,6 @@
         },
         "frameworks": {
           "net10.0": {
-            "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {}
           }
@@ -49,7 +48,6 @@
       },
       "frameworks": {
         "net10.0": {
-          "framework": "net10.0",
           "targetAlias": "net10.0",
           "dependencies": {
             "BCrypt.Net-Next": {
