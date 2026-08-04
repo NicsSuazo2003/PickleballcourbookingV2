@@ -22,4 +22,4 @@ public class Booking
     public string? Notes { get; set; }
 
     public ICollection<TimeSlot> Slots { get; set; } = new List<TimeSlot>();
-}
+}   
