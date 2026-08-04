@@ -45,21 +45,23 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// CORS for React frontend
-// CORS for React frontend
+// ✅ CORS - Read from appsettings.json
+var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? new[] {
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://sideout-playground.vercel.app",
+        "https://sideoutplayground.vercel.app",
+        "https://pickleball-client2.vercel.app"
+    };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
-        policy.WithOrigins(
-            "http://localhost:5173",                                    // Local dev
-            "https://sideout-playground.vercel.app",                    // ✅ NEW: with hyphen
-            "https://sideoutplayground.vercel.app",                     // Keep old just in case
-            "https://pickleball-client2.vercel.app",                    // Old client (can remove later)
-            "https://pickleball-client2-git-*.vercel.app"               // Preview deployments
-        )
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials());
+        policy.WithOrigins(corsOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials());
 });
 
 var app = builder.Build();

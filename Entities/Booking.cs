@@ -3,6 +3,11 @@
 public class Booking
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+
+    // ✅ NEW - Link to Court
+    public Guid CourtId { get; set; }
+    public Court Court { get; set; } = null!;
+
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerEmail { get; set; } = string.Empty;
     public string? CustomerPhone { get; set; }

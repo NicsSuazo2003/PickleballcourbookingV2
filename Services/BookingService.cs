@@ -23,18 +23,27 @@ public class BookingService : IBookingService
     {
         var bookingDate = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc);
 
-        // Skip double-booking check if admin override
+        // ✅ Validate court exists
+        var court = await _db.Courts.FindAsync(Guid.Parse(request.CourtId))
+            ?? throw new KeyNotFoundException("Court not found");
+
+        // ✅ Check availability for this specific court
         if (!request.AdminOverride)
         {
             var requestedStartTimes = request.Slots.Select(s => TimeOnly.Parse(s.StartTime)).ToHashSet();
             var conflictingBookings = await _db.Bookings
-                .Where(b => b.Date.Date == bookingDate.Date && b.Status != "cancelled" && b.Status != "expired")
+                .Where(b => b.Date.Date == bookingDate.Date
+                    && b.CourtId == court.Id
+                    && b.Status != "cancelled"
+                    && b.Status != "expired")
                 .Include(b => b.Slots)
                 .ToListAsync();
+
             var bookedTimes = conflictingBookings
                 .SelectMany(b => b.Slots)
                 .Select(s => s.StartTime)
                 .ToHashSet();
+
             if (requestedStartTimes.Any(t => bookedTimes.Contains(t)))
                 throw new InvalidOperationException("One or more selected time slots are no longer available.");
         }
@@ -44,6 +53,7 @@ public class BookingService : IBookingService
 
         var booking = new Booking
         {
+            CourtId = court.Id,  // ✅ NEW
             CustomerName = request.CustomerName,
             CustomerEmail = request.CustomerEmail,
             CustomerPhone = request.CustomerPhone,
@@ -56,6 +66,7 @@ public class BookingService : IBookingService
             CreatedAt = DateTime.UtcNow,
             Slots = request.Slots.Select(s => new TimeSlot
             {
+                CourtId = court.Id,  // ✅ NEW
                 Date = bookingDate,
                 StartTime = TimeOnly.Parse(s.StartTime),
                 EndTime = TimeOnly.Parse(s.EndTime)
@@ -80,12 +91,15 @@ public class BookingService : IBookingService
 
         return await query
             .Include(b => b.Slots)
+            .Include(b => b.Court)  // ✅ Include court info
             .Select(b => MapToDto(b))
             .FirstOrDefaultAsync();
     }
+
     public async Task<List<BookingDto>> GetAllBookingsAsync() =>
         await _db.Bookings
             .Include(b => b.Slots)
+            .Include(b => b.Court)  // ✅ Include court info
             .OrderByDescending(b => b.Date)
             .Select(b => MapToDto(b))
             .ToListAsync();
@@ -94,6 +108,7 @@ public class BookingService : IBookingService
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
+            .Include(b => b.Court)  // ✅ Include court info
             .FirstOrDefaultAsync(b => b.Id == id)
             ?? throw new KeyNotFoundException("Booking not found");
 
@@ -108,7 +123,16 @@ public class BookingService : IBookingService
                 : "";
             _ = Task.Run(async () =>
             {
-                try { await _email.NotifyCustomerBookingConfirmedAsync(booking.CustomerEmail, booking.CustomerName, booking.ReferenceCode, booking.Date.ToString("yyyy-MM-dd"), timeDisplay); }
+                try
+                {
+                    await _email.NotifyCustomerBookingConfirmedAsync(
+                        booking.CustomerEmail,
+                        booking.CustomerName,
+                        booking.ReferenceCode,
+                        booking.Date.ToString("yyyy-MM-dd"),
+                        timeDisplay
+                    );
+                }
                 catch { }
             });
         }
@@ -120,6 +144,7 @@ public class BookingService : IBookingService
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
+            .Include(b => b.Court)  // ✅ Include court info
             .FirstOrDefaultAsync(b => b.Id == id)
             ?? throw new KeyNotFoundException("Booking not found");
 
@@ -130,7 +155,13 @@ public class BookingService : IBookingService
         // Notify admin
         try
         {
-            await _email.NotifyAdminNewBookingAsync(booking.CustomerName, booking.ReferenceCode + " [PAYMENT]", booking.Date.ToString("yyyy-MM-dd"), "Screenshot uploaded", $"₱{booking.TotalAmount}");
+            await _email.NotifyAdminNewBookingAsync(
+                booking.CustomerName,
+                booking.ReferenceCode + " [PAYMENT]",
+                booking.Date.ToString("yyyy-MM-dd"),
+                "Screenshot uploaded",
+                $"₱{booking.TotalAmount}"
+            );
         }
         catch { }
 
@@ -169,12 +200,32 @@ public class BookingService : IBookingService
         await _db.SaveChangesAsync();
     }
 
+    // ========================================
+    // ✅ UPDATED MapToDto with Court info
+    // ========================================
+
     private static BookingDto MapToDto(Booking b) => new(
-        b.Id.ToString(), b.CustomerName, b.CustomerEmail, b.CustomerPhone,
-        b.ReferenceCode, b.Date.ToString("yyyy-MM-dd"),
-        b.Slots.Select(s => new TimeSlotDto(s.Id.ToString(), s.Date.ToString("yyyy-MM-dd"),
-            s.StartTime.ToString("HH:mm"), s.EndTime.ToString("HH:mm"), false)).ToList(),
-        b.TotalAmount, b.Status, b.PaymentMethod, b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"), b.Notes,
-        b.PaymentScreenshot, b.PaymentExpiresAt
+        b.Id.ToString(),
+        b.CourtId.ToString(),        // ✅ NEW
+        b.Court?.Name ?? "",         // ✅ NEW
+        b.CustomerName,
+        b.CustomerEmail,
+        b.CustomerPhone,
+        b.ReferenceCode,
+        b.Date.ToString("yyyy-MM-dd"),
+        b.Slots.Select(s => new TimeSlotDto(
+            s.Id.ToString(),
+            s.Date.ToString("yyyy-MM-dd"),
+            s.StartTime.ToString("HH:mm"),
+            s.EndTime.ToString("HH:mm"),
+            false
+        )).ToList(),
+        b.TotalAmount,
+        b.Status,
+        b.PaymentMethod,
+        b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        b.Notes,
+        b.PaymentScreenshot,
+        b.PaymentExpiresAt
     );
 }

@@ -9,12 +9,25 @@ public record CourtDto(
     List<string> Amenities,
     double Rating,
     string ImageUrl,
-    List<string> Images,          // NEW
+    List<string> Images,
     string Status,
     string OpenTime,
     string CloseTime,
     string Dimensions,
     string Surface
+);
+
+// ✅ NEW - For creating a court
+public record CreateCourtRequest(
+    string Name,
+    string Type,
+    bool Indoor,
+    decimal PricePerHour,
+    List<string>? Amenities,
+    string OpenTime,
+    string CloseTime,
+    string? Dimensions,
+    string? Surface
 );
 
 public record UpdateCourtRequest(
@@ -24,7 +37,7 @@ public record UpdateCourtRequest(
     decimal? PricePerHour,
     List<string>? Amenities,
     string? ImageUrl,
-    List<string>? Images,          // NEW
+    List<string>? Images,
     string? Status,
     string? OpenTime,
     string? CloseTime,

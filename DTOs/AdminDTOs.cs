@@ -11,6 +11,17 @@ public record AnalyticsDto(
     double UsersGrowth
 );
 
+// ✅ NEW - Per-court analytics
+public record CourtAnalyticsDto(
+    string CourtId,
+    string CourtName,
+    int TotalBookings,
+    decimal TotalRevenue,
+    int ConfirmedBookings,
+    int PendingBookings,
+    double UtilizationRate
+);
+
 public record RevenueByDayDto(string Date, decimal Revenue);
 public record BookingsByDayDto(string Date, int Bookings);
 public record AdminUpdateUserRequest(string? Name, string? Email, string? Role, string? Status);

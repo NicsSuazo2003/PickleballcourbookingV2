@@ -37,6 +37,55 @@ public class AdminService : IAdminService
             .Select(g => new BookingsByDayDto(g.Key.ToString("yyyy-MM-dd"), g.Count()))
             .OrderBy(b => b.Date).TakeLast(30).ToList();
 
-        return new AnalyticsDto(totalRevenue, totalBookings, activeUsers, revenueByDay, bookingsByDay, 12.5, 8.3, 5.1);
+        return new AnalyticsDto(
+            totalRevenue,
+            totalBookings,
+            activeUsers,
+            revenueByDay,
+            bookingsByDay,
+            12.5,
+            8.3,
+            5.1
+        );
+    }
+
+    // ✅ NEW - Per-court analytics
+    public async Task<List<CourtAnalyticsDto>> GetCourtAnalyticsAsync()
+    {
+        var courts = await _db.Courts.ToListAsync();
+        var result = new List<CourtAnalyticsDto>();
+
+        foreach (var court in courts)
+        {
+            var bookings = await _db.Bookings
+                .Where(b => b.CourtId == court.Id)
+                .ToListAsync();
+
+            var totalBookings = bookings.Count;
+            var totalRevenue = bookings
+                .Where(b => b.Status == "confirmed" || b.Status == "completed")
+                .Sum(b => b.TotalAmount);
+            var confirmed = bookings.Count(b => b.Status == "confirmed" || b.Status == "completed");
+            var pending = bookings.Count(b => b.Status == "pending_payment" || b.Status == "payment_submitted");
+
+            // Calculate utilization (assuming 12 hours of operation per day)
+            var totalSlots = bookings.Sum(b => b.Slots.Count);
+            var totalPossibleSlots = 12 * 30; // 12 hours * 30 days
+            var utilizationRate = totalPossibleSlots > 0
+                ? Math.Round((double)totalSlots / totalPossibleSlots * 100, 1)
+                : 0;
+
+            result.Add(new CourtAnalyticsDto(
+                court.Id.ToString(),
+                court.Name,
+                totalBookings,
+                totalRevenue,
+                confirmed,
+                pending,
+                utilizationRate
+            ));
+        }
+
+        return result;
     }
 }

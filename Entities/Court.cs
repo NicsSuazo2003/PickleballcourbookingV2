@@ -12,7 +12,7 @@ public class Court
     public string AmenitiesRaw { get; set; } = string.Empty;
     public double Rating { get; set; }
     public string ImageUrl { get; set; } = string.Empty;
-    public string ImagesRaw { get; set; } = string.Empty; // NEW: comma-separated image URLs
+    public string ImagesRaw { get; set; } = string.Empty;
     public string Status { get; set; } = "active";
     public TimeOnly OpenTime { get; set; }
     public TimeOnly CloseTime { get; set; }
@@ -32,4 +32,9 @@ public class Court
         get => ImagesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
         set => ImagesRaw = string.Join(',', value);
     }
+
+    // ✅ Navigation Properties
+    public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
+    public ICollection<TimeSlot> TimeSlots { get; set; } = new List<TimeSlot>();
+    public ICollection<BlockedDate> BlockedDates { get; set; } = new List<BlockedDate>();
 }
