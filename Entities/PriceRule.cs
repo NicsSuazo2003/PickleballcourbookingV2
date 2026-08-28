@@ -10,4 +10,6 @@ public class PriceRule
     public decimal PricePerHour { get; set; }
     public bool IsActive { get; set; } = true;
     public int Priority { get; set; } = 0;                   // Higher = overrides lower
+    public Guid ClientId { get; set; }
+    public Client Client { get; set; } = null!;
 }

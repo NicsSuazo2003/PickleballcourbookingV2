@@ -11,29 +11,27 @@ public class AdminService : IAdminService
 
     public AdminService(AppDbContext db) => _db = db;
 
-    public async Task<AnalyticsDto> GetAnalyticsAsync()
+    public async Task<AnalyticsDto> GetAnalyticsAsync(Guid clientId)
     {
-        var totalRevenue = await _db.Bookings
-            .Where(b => b.Status == "confirmed" || b.Status == "completed")
-            .SumAsync(b => (decimal?)b.TotalAmount) ?? 0;
-
-        var totalBookings = await _db.Bookings.CountAsync();
-        var activeUsers = await _db.Bookings.Select(b => b.CustomerEmail).Distinct().CountAsync();
-
-        var confirmedBookings = await _db.Bookings
-            .Where(b => b.Status == "confirmed" || b.Status == "completed")
-            .Select(b => new { b.Date, b.TotalAmount })
+        var bookings = await _db.Bookings
+            .Where(b => b.ClientId == clientId)
             .ToListAsync();
 
-        var revenueByDay = confirmedBookings
+        var confirmedOrCompleted = bookings
+            .Where(b => b.Status == "confirmed" || b.Status == "completed")
+            .ToList();
+
+        var totalRevenue = confirmedOrCompleted.Sum(b => b.TotalAmount);
+        var totalBookings = bookings.Count;
+        var activeUsers = bookings.Select(b => b.CustomerEmail).Distinct().Count();
+
+        var revenueByDay = confirmedOrCompleted
             .GroupBy(b => b.Date.Date)
             .Select(g => new RevenueByDayDto(g.Key.ToString("yyyy-MM-dd"), g.Sum(b => b.TotalAmount)))
             .OrderBy(r => r.Date).TakeLast(30).ToList();
 
-        var allBookingDates = await _db.Bookings.Select(b => b.Date).ToListAsync();
-
-        var bookingsByDay = allBookingDates
-            .GroupBy(d => d.Date)
+        var bookingsByDay = bookings
+            .GroupBy(b => b.Date.Date)
             .Select(g => new BookingsByDayDto(g.Key.ToString("yyyy-MM-dd"), g.Count()))
             .OrderBy(b => b.Date).TakeLast(30).ToList();
 
@@ -49,16 +47,18 @@ public class AdminService : IAdminService
         );
     }
 
-    // ✅ NEW - Per-court analytics
-    public async Task<List<CourtAnalyticsDto>> GetCourtAnalyticsAsync()
+    public async Task<List<CourtAnalyticsDto>> GetCourtAnalyticsAsync(Guid clientId)
     {
-        var courts = await _db.Courts.ToListAsync();
+        var courts = await _db.Courts
+            .Where(c => c.ClientId == clientId)
+            .ToListAsync();
+
         var result = new List<CourtAnalyticsDto>();
 
         foreach (var court in courts)
         {
             var bookings = await _db.Bookings
-                .Where(b => b.CourtId == court.Id)
+                .Where(b => b.CourtId == court.Id && b.ClientId == clientId)
                 .ToListAsync();
 
             var totalBookings = bookings.Count;
@@ -68,9 +68,8 @@ public class AdminService : IAdminService
             var confirmed = bookings.Count(b => b.Status == "confirmed" || b.Status == "completed");
             var pending = bookings.Count(b => b.Status == "pending_payment" || b.Status == "payment_submitted");
 
-            // Calculate utilization (assuming 12 hours of operation per day)
             var totalSlots = bookings.Sum(b => b.Slots.Count);
-            var totalPossibleSlots = 12 * 30; // 12 hours * 30 days
+            var totalPossibleSlots = 12 * 30;
             var utilizationRate = totalPossibleSlots > 0
                 ? Math.Round((double)totalSlots / totalPossibleSlots * 100, 1)
                 : 0;

@@ -13,4 +13,6 @@ public class BlockedDate
     public TimeOnly? EndTime { get; set; }
     public string? Reason { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid ClientId { get; set; }
+    public Client Client { get; set; } = null!;
 }

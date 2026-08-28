@@ -20,6 +20,8 @@ public class Booking
     public DateTime? PaymentExpiresAt { get; set; }
     public string? PaymentScreenshot { get; set; }
     public string? Notes { get; set; }
+    public Guid ClientId { get; set; }
+    public Client Client { get; set; } = null!;
 
     public ICollection<TimeSlot> Slots { get; set; } = new List<TimeSlot>();
 }   

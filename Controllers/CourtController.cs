@@ -2,50 +2,77 @@
 using Microsoft.AspNetCore.Mvc;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
+using PickleballBookingSystem.Middleware;
 
 namespace PickleballBookingSystem.Controllers;
 
 [ApiController]
-[Route("api/courts")]  // ✅ Changed from "api/court" to "api/courts"
+[Route("api/courts")]
 public class CourtController : ControllerBase
 {
     private readonly ICourtService _court;
+    private readonly ClientResolver _clientResolver;
 
-    public CourtController(ICourtService court) => _court = court;
+    public CourtController(ICourtService court, ClientResolver clientResolver)
+    {
+        _court = court;
+        _clientResolver = clientResolver;
+    }
+
+    private async Task<Guid> GetClientId()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        if (string.IsNullOrEmpty(subdomain))
+            throw new UnauthorizedAccessException("Client identification required");
+
+        // You'll need to add a service to get client ID from subdomain
+        // For now, we'll use a placeholder - you'll need to implement this
+        // using your client service
+        return await GetClientIdFromSubdomain(subdomain);
+    }
+
+    private async Task<Guid> GetClientIdFromSubdomain(string subdomain)
+    {
+        // You'll need to implement this with your ClientService
+        // For now, let's assume you have a way to get client ID
+        // This is a placeholder - you need to inject IClientService
+        // and use it here
+        return Guid.Parse("your-client-id"); // Replace with actual logic
+    }
 
     // ========================================
     // ✅ PUBLIC ENDPOINTS
     // ========================================
 
-    // GET all courts
     [HttpGet]
     public async Task<ActionResult<List<CourtDto>>> GetAllCourts()
     {
-        var courts = await _court.GetAllCourtsAsync();
+        var clientId = await GetClientId();
+        var courts = await _court.GetAllCourtsAsync(clientId);
         return Ok(courts);
     }
 
-    // GET single court
     [HttpGet("{id}")]
     public async Task<ActionResult<CourtDto>> GetCourt(Guid id)
     {
-        var court = await _court.GetCourtByIdAsync(id);
+        var clientId = await GetClientId();
+        var court = await _court.GetCourtByIdAsync(id, clientId);
         return Ok(court);
     }
 
-    // GET court availability
     [HttpGet("{id}/availability")]
     public async Task<ActionResult<List<TimeSlotAvailabilityDto>>> GetAvailability(Guid id, [FromQuery] DateTime date)
     {
-        var slots = await _court.GetCourtAvailabilityAsync(id, date);
+        var clientId = await GetClientId();
+        var slots = await _court.GetCourtAvailabilityAsync(id, date, clientId);
         return Ok(slots);
     }
 
-    // GET blocked dates for a specific court
     [HttpGet("{id}/blocked-dates")]
     public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDates(Guid id)
     {
-        var blockedDates = await _court.GetBlockedDatesAsync(id);
+        var clientId = await GetClientId();
+        var blockedDates = await _court.GetBlockedDatesAsync(id, clientId);
         return Ok(blockedDates);
     }
 
@@ -57,7 +84,8 @@ public class CourtController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<CourtDto>> CreateCourt(CreateCourtRequest request)
     {
-        var court = await _court.CreateCourtAsync(request);
+        var clientId = await GetClientId();
+        var court = await _court.CreateCourtAsync(request, clientId);
         return CreatedAtAction(nameof(GetCourt), new { id = court.Id }, court);
     }
 
@@ -65,7 +93,8 @@ public class CourtController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<CourtDto>> UpdateCourt(Guid id, UpdateCourtRequest request)
     {
-        var court = await _court.UpdateCourtAsync(id, request);
+        var clientId = await GetClientId();
+        var court = await _court.UpdateCourtAsync(id, request, clientId);
         return Ok(court);
     }
 
@@ -73,7 +102,8 @@ public class CourtController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteCourt(Guid id)
     {
-        await _court.DeleteCourtAsync(id);
+        var clientId = await GetClientId();
+        await _court.DeleteCourtAsync(id, clientId);
         return NoContent();
     }
 
@@ -81,7 +111,8 @@ public class CourtController : ControllerBase
     [HttpPost("{id}/blocked-dates")]
     public async Task<ActionResult<BlockedDateDto>> AddBlockedDate(Guid id, CreateBlockedDateRequest request)
     {
-        var result = await _court.AddBlockedDateAsync(request, id);
+        var clientId = await GetClientId();
+        var result = await _court.AddBlockedDateAsync(request, id, clientId);
         return CreatedAtAction(nameof(GetBlockedDates), new { id }, result);
     }
 
@@ -89,7 +120,8 @@ public class CourtController : ControllerBase
     [HttpDelete("blocked-dates/{blockedId}")]
     public async Task<IActionResult> DeleteBlockedDate(Guid blockedId)
     {
-        await _court.DeleteBlockedDateAsync(blockedId);
+        var clientId = await GetClientId();
+        await _court.DeleteBlockedDateAsync(blockedId, clientId);
         return NoContent();
     }
 
@@ -123,14 +155,15 @@ public class CourtController : ControllerBase
     [HttpGet("legacy/blocked-dates")]
     public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDatesLegacy()
     {
-        return Ok(await _court.GetBlockedDatesAsync());
+        return Ok(await _court.GetBlockedDatesAsync(null, Guid.Empty)); // Use appropriate client ID
     }
 
     [Authorize(Roles = "admin")]
     [HttpPost("legacy/blocked-dates")]
     public async Task<ActionResult<BlockedDateDto>> AddBlockedDateLegacy(CreateBlockedDateRequest request)
     {
-        var result = await _court.AddBlockedDateAsync(request);
+        var clientId = await GetClientId();
+        var result = await _court.AddBlockedDateAsync(request, null, clientId);
         return CreatedAtAction(nameof(GetBlockedDatesLegacy), result);
     }
 
@@ -141,7 +174,8 @@ public class CourtController : ControllerBase
     [HttpGet("price-rules")]
     public async Task<ActionResult<List<PriceRuleDto>>> GetPriceRules()
     {
-        var rules = await _court.GetPriceRulesAsync();
+        var clientId = await GetClientId();
+        var rules = await _court.GetPriceRulesAsync(clientId);
         return Ok(rules);
     }
 
@@ -149,7 +183,8 @@ public class CourtController : ControllerBase
     [HttpPost("price-rules")]
     public async Task<ActionResult<PriceRuleDto>> CreatePriceRule(CreatePriceRuleRequest request)
     {
-        var rule = await _court.CreatePriceRuleAsync(request);
+        var clientId = await GetClientId();
+        var rule = await _court.CreatePriceRuleAsync(request, clientId);
         return CreatedAtAction(nameof(GetPriceRules), rule);
     }
 
@@ -157,7 +192,8 @@ public class CourtController : ControllerBase
     [HttpPut("price-rules/{id}")]
     public async Task<ActionResult<PriceRuleDto>> UpdatePriceRule(Guid id, UpdatePriceRuleRequest request)
     {
-        var rule = await _court.UpdatePriceRuleAsync(id, request);
+        var clientId = await GetClientId();
+        var rule = await _court.UpdatePriceRuleAsync(id, request, clientId);
         return Ok(rule);
     }
 
@@ -165,7 +201,8 @@ public class CourtController : ControllerBase
     [HttpDelete("price-rules/{id}")]
     public async Task<IActionResult> DeletePriceRule(Guid id)
     {
-        await _court.DeletePriceRuleAsync(id);
+        var clientId = await GetClientId();
+        await _court.DeletePriceRuleAsync(id, clientId);
         return NoContent();
     }
 }

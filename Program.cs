@@ -43,6 +43,9 @@ builder.Services.AddScoped<IAdminService, AdminService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ClientResolver>();
+builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddSwaggerGen();
 
 // ✅ CORS - Read from appsettings.json

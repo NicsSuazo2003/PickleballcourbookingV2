@@ -19,12 +19,13 @@ public class BookingService : IBookingService
         _config = config;
     }
 
-    public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request)
+    public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
     {
         var bookingDate = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc);
 
-        // ✅ Validate court exists
-        var court = await _db.Courts.FindAsync(Guid.Parse(request.CourtId))
+        // ✅ Validate court exists and belongs to client
+        var court = await _db.Courts
+            .FirstOrDefaultAsync(c => c.Id == Guid.Parse(request.CourtId) && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
 
         // ✅ Check availability for this specific court
@@ -34,6 +35,7 @@ public class BookingService : IBookingService
             var conflictingBookings = await _db.Bookings
                 .Where(b => b.Date.Date == bookingDate.Date
                     && b.CourtId == court.Id
+                    && b.ClientId == clientId
                     && b.Status != "cancelled"
                     && b.Status != "expired")
                 .Include(b => b.Slots)
@@ -48,12 +50,13 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException("One or more selected time slots are no longer available.");
         }
 
-        var referenceCode = $"SOP-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+        var referenceCode = $"PJ-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
         var bookingStatus = request.Status ?? "pending_payment";
 
         var booking = new Booking
         {
-            CourtId = court.Id,  // ✅ NEW
+            CourtId = court.Id,
+            ClientId = clientId,  // ✅ Set ClientId
             CustomerName = request.CustomerName,
             CustomerEmail = request.CustomerEmail,
             CustomerPhone = request.CustomerPhone,
@@ -66,7 +69,7 @@ public class BookingService : IBookingService
             CreatedAt = DateTime.UtcNow,
             Slots = request.Slots.Select(s => new TimeSlot
             {
-                CourtId = court.Id,  // ✅ NEW
+                CourtId = court.Id,
                 Date = bookingDate,
                 StartTime = TimeOnly.Parse(s.StartTime),
                 EndTime = TimeOnly.Parse(s.EndTime)
@@ -79,9 +82,9 @@ public class BookingService : IBookingService
         return MapToDto(booking);
     }
 
-    public async Task<BookingDto?> TrackBookingAsync(string referenceCode, string email)
+    public async Task<BookingDto?> TrackBookingAsync(string referenceCode, string email, Guid clientId)
     {
-        var query = _db.Bookings.AsQueryable();
+        var query = _db.Bookings.Where(b => b.ClientId == clientId);
 
         if (!string.IsNullOrEmpty(referenceCode) && referenceCode != "ANY")
             query = query.Where(b => b.ReferenceCode == referenceCode);
@@ -91,25 +94,26 @@ public class BookingService : IBookingService
 
         return await query
             .Include(b => b.Slots)
-            .Include(b => b.Court)  // ✅ Include court info
+            .Include(b => b.Court)
             .Select(b => MapToDto(b))
             .FirstOrDefaultAsync();
     }
 
-    public async Task<List<BookingDto>> GetAllBookingsAsync() =>
+    public async Task<List<BookingDto>> GetAllBookingsAsync(Guid clientId) =>
         await _db.Bookings
+            .Where(b => b.ClientId == clientId)
             .Include(b => b.Slots)
-            .Include(b => b.Court)  // ✅ Include court info
+            .Include(b => b.Court)
             .OrderByDescending(b => b.Date)
             .Select(b => MapToDto(b))
             .ToListAsync();
 
-    public async Task<BookingDto> AdminUpdateBookingAsync(Guid id, AdminUpdateBookingRequest request)
+    public async Task<BookingDto> AdminUpdateBookingAsync(Guid id, AdminUpdateBookingRequest request, Guid clientId)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
-            .Include(b => b.Court)  // ✅ Include court info
-            .FirstOrDefaultAsync(b => b.Id == id)
+            .Include(b => b.Court)
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Booking not found");
 
         booking.Status = request.Status;
@@ -140,12 +144,12 @@ public class BookingService : IBookingService
         return MapToDto(booking);
     }
 
-    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotUrl)
+    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotUrl, Guid clientId)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
-            .Include(b => b.Court)  // ✅ Include court info
-            .FirstOrDefaultAsync(b => b.Id == id)
+            .Include(b => b.Court)
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Booking not found");
 
         booking.PaymentScreenshot = screenshotUrl;
@@ -168,11 +172,11 @@ public class BookingService : IBookingService
         return MapToDto(booking);
     }
 
-    public async Task AutoCompletePastBookingsAsync()
+    public async Task AutoCompletePastBookingsAsync(Guid clientId)
     {
         var now = DateTime.UtcNow;
         var pastConfirmed = await _db.Bookings
-            .Where(b => b.Status == "confirmed")
+            .Where(b => b.Status == "confirmed" && b.ClientId == clientId)
             .Include(b => b.Slots)
             .ToListAsync();
 
@@ -186,11 +190,11 @@ public class BookingService : IBookingService
         await _db.SaveChangesAsync();
     }
 
-    public async Task CancelExpiredPaymentsAsync()
+    public async Task CancelExpiredPaymentsAsync(Guid clientId)
     {
         var now = DateTime.UtcNow;
         var expired = await _db.Bookings
-            .Where(b => b.Status == "pending_payment" && b.PaymentExpiresAt < now)
+            .Where(b => b.Status == "pending_payment" && b.PaymentExpiresAt < now && b.ClientId == clientId)
             .ToListAsync();
 
         foreach (var booking in expired)
@@ -200,14 +204,10 @@ public class BookingService : IBookingService
         await _db.SaveChangesAsync();
     }
 
-    // ========================================
-    // ✅ UPDATED MapToDto with Court info
-    // ========================================
-
     private static BookingDto MapToDto(Booking b) => new(
         b.Id.ToString(),
-        b.CourtId.ToString(),        // ✅ NEW
-        b.Court?.Name ?? "",         // ✅ NEW
+        b.CourtId.ToString(),
+        b.Court?.Name ?? "",
         b.CustomerName,
         b.CustomerEmail,
         b.CustomerPhone,

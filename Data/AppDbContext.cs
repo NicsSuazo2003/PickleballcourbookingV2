@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<BlockedDate> BlockedDates => Set<BlockedDate>();
     public DbSet<PriceRule> PriceRules => Set<PriceRule>();
+    public DbSet<Client> Clients => Set<Client>(); // ✅ NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,12 +30,36 @@ public class AppDbContext : DbContext
             e.HasIndex(u => u.Email).IsUnique();
         });
 
+        // ✅ Client - Court relationship
+        modelBuilder.Entity<Client>(e =>
+        {
+            e.HasMany(c => c.Courts)
+                .WithOne(crt => crt.Client)
+                .HasForeignKey(crt => crt.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ✅ Client - Booking relationship
+        modelBuilder.Entity<Client>(e =>
+        {
+            e.HasMany(c => c.Bookings)
+                .WithOne(b => b.Client)
+                .HasForeignKey(b => b.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // ✅ Court - Booking relationship
         modelBuilder.Entity<Court>(e =>
         {
             e.HasMany(c => c.Bookings)
                 .WithOne(b => b.Court)
                 .HasForeignKey(b => b.CourtId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ Court belongs to Client
+            e.HasOne(c => c.Client)
+                .WithMany(cl => cl.Courts)
+                .HasForeignKey(c => c.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -69,6 +94,12 @@ public class AppDbContext : DbContext
                 .WithMany(c => c.Bookings)
                 .HasForeignKey(b => b.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ Booking belongs to Client
+            e.HasOne(b => b.Client)
+                .WithMany(cl => cl.Bookings)
+                .HasForeignKey(b => b.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ✅ TimeSlot configuration
@@ -95,6 +126,22 @@ public class AppDbContext : DbContext
                 .WithMany(c => c.BlockedDates)
                 .HasForeignKey(bd => bd.CourtId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // ✅ BlockedDate belongs to Client (optional - if you want client-level blocking)
+            e.HasOne(bd => bd.Client)
+                .WithMany()
+                .HasForeignKey(bd => bd.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ✅ PriceRule configuration
+        modelBuilder.Entity<PriceRule>(e =>
+        {
+            // PriceRule belongs to Client
+            e.HasOne(pr => pr.Client)
+                .WithMany()
+                .HasForeignKey(pr => pr.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Notification configuration
@@ -106,4 +153,4 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }
-}
+}   

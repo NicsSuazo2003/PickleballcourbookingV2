@@ -18,6 +18,8 @@ public class Court
     public TimeOnly CloseTime { get; set; }
     public string Dimensions { get; set; } = string.Empty;
     public string Surface { get; set; } = string.Empty;
+    public Guid ClientId { get; set; }
+    public Client Client { get; set; } = null!;
 
     [NotMapped]
     public List<string> Amenities

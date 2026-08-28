@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
+using PickleballBookingSystem.Middleware;
 
 namespace PickleballBookingSystem.Controllers;
 
@@ -10,25 +11,40 @@ public class BookingController : ControllerBase
 {
     private readonly IBookingService _booking;
     private readonly IConfiguration _config;
+    private readonly ClientResolver _clientResolver;
 
-    public BookingController(IBookingService booking, IConfiguration config)
+    public BookingController(IBookingService booking, IConfiguration config, ClientResolver clientResolver)
     {
         _booking = booking;
         _config = config;
+        _clientResolver = clientResolver;
+    }
+
+    private async Task<Guid> GetClientId()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        if (string.IsNullOrEmpty(subdomain))
+            throw new UnauthorizedAccessException("Client identification required");
+
+        // You'll need to implement this with your ClientService
+        // This is a placeholder - you need to inject IClientService
+        // and use it here
+        return Guid.Parse("your-client-id"); // Replace with actual logic
     }
 
     [HttpPost]
     public async Task<ActionResult<BookingDto>> Create(CreateBookingRequest request)
     {
-        var booking = await _booking.CreateBookingAsync(request);
+        var clientId = await GetClientId();
+        var booking = await _booking.CreateBookingAsync(request, clientId);
         return CreatedAtAction(nameof(Track), new { referenceCode = booking.ReferenceCode }, booking);
     }
 
     [HttpGet("track/{referenceCode}")]
     public async Task<ActionResult<BookingDto>> Track(string referenceCode, [FromQuery] string? email)
-  
     {
-        var booking = await _booking.TrackBookingAsync(referenceCode, email);
+        var clientId = await GetClientId();
+        var booking = await _booking.TrackBookingAsync(referenceCode, email, clientId);
         if (booking == null) return NotFound(new { message = "Booking not found" });
         return Ok(booking);
     }
@@ -39,7 +55,7 @@ public class BookingController : ControllerBase
         if (screenshot == null || screenshot.Length == 0)
             return BadRequest(new { message = "No file provided" });
 
-        // Upload to Supabase
+        var clientId = await GetClientId();
         var supabaseUrl = _config["Supabase:Url"]!;
         var supabaseKey = _config["Supabase:Key"]!;
         var fileName = $"payment-{Guid.NewGuid()}{Path.GetExtension(screenshot.FileName)}";
@@ -60,29 +76,32 @@ public class BookingController : ControllerBase
             return BadRequest(new { message = "Upload failed" });
 
         var screenshotUrl = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
-        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl);
+        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl, clientId);
         return Ok(booking);
     }
 
     [Authorize(Roles = "admin"), HttpGet("admin")]
     public async Task<ActionResult<List<BookingDto>>> GetAll()
     {
-        var bookings = await _booking.GetAllBookingsAsync();
+        var clientId = await GetClientId();
+        var bookings = await _booking.GetAllBookingsAsync(clientId);
         return Ok(bookings);
     }
 
     [Authorize(Roles = "admin"), HttpPut("admin/{id}")]
     public async Task<ActionResult<BookingDto>> AdminUpdate(Guid id, AdminUpdateBookingRequest request)
     {
-        var booking = await _booking.AdminUpdateBookingAsync(id, request);
-        return Ok(booking);
-    }
-    [Authorize(Roles = "admin"), HttpPost("admin-create")]
-    public async Task<ActionResult<BookingDto>> AdminCreate(CreateBookingRequest request)
-    {
-        request = request with { AdminOverride = true };
-        var booking = await _booking.CreateBookingAsync(request);
+        var clientId = await GetClientId();
+        var booking = await _booking.AdminUpdateBookingAsync(id, request, clientId);
         return Ok(booking);
     }
 
+    [Authorize(Roles = "admin"), HttpPost("admin-create")]
+    public async Task<ActionResult<BookingDto>> AdminCreate(CreateBookingRequest request)
+    {
+        var clientId = await GetClientId();
+        request = request with { AdminOverride = true };
+        var booking = await _booking.CreateBookingAsync(request, clientId);
+        return Ok(booking);
+    }
 }
