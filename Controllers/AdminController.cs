@@ -14,13 +14,20 @@ public class AdminController : ControllerBase
     private readonly IBookingService _booking;
     private readonly ICourtService _court;
     private readonly ClientResolver _clientResolver;
+    private readonly IClientService _clientService;
 
-    public AdminController(IAdminService admin, IBookingService booking, ICourtService court, ClientResolver clientResolver)
+    public AdminController(
+        IAdminService admin,
+        IBookingService booking,
+        ICourtService court,
+        ClientResolver clientResolver,
+        IClientService clientService)
     {
         _admin = admin;
         _booking = booking;
         _court = court;
         _clientResolver = clientResolver;
+        _clientService = clientService;
     }
 
     private async Task<Guid> GetClientId()
@@ -29,8 +36,7 @@ public class AdminController : ControllerBase
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
-        // You'll need to implement this with your ClientService
-        return Guid.Parse("your-client-id"); // Replace with actual logic
+        return await _clientService.GetClientIdBySubdomainAsync(subdomain);
     }
 
     [HttpGet("analytics")]
