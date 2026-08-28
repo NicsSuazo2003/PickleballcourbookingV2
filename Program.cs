@@ -9,14 +9,14 @@ using PickleballBookingSystem.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ✅ Fix: Bind to 0.0.0.0:5000 for Render
-var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
-builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
-
-// ✅ FIX: Disable file watching to avoid inotify limit
+// Rebuild configuration FIRST
 builder.Configuration.Sources.Clear();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
 builder.Configuration.AddEnvironmentVariables();
+
+// THEN bind the URL, so it isn't wiped out
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 // Database
 builder.Services.AddDbContext<AppDbContext>(options =>
