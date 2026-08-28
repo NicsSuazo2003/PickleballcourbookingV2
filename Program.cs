@@ -10,7 +10,9 @@ using PickleballBookingSystem.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // ✅ FIX: Disable file watching to avoid inotify limit
+builder.Configuration.Sources.Clear();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+builder.Configuration.AddEnvironmentVariables();
 
 // Database
 builder.Services.AddDbContext<AppDbContext>(options =>
