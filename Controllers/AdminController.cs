@@ -117,3 +117,4 @@ public class AdminController : ControllerBase
         var headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString());
         return Ok(headers)
 }
+}
