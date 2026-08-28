@@ -11,16 +11,19 @@ public class ClientResolver
 
     public string? GetSubdomain()
     {
+        // Prefer the explicit header sent by the frontend
+        var headerSubdomain = _httpContextAccessor.HttpContext?.Request.Headers["X-Client-Subdomain"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(headerSubdomain))
+            return headerSubdomain;
+
+        // Fallback: infer from host (useful if you later map real subdomains, e.g. picklejoe.yourapp.com)
         var host = _httpContextAccessor.HttpContext?.Request.Host.Host;
         if (string.IsNullOrEmpty(host)) return null;
 
         var parts = host.Split('.');
         if (parts.Length >= 2 && parts[0] != "www" && parts[0] != "localhost")
-        {
             return parts[0];
-        }
 
-        // Development fallback - use header
-        return _httpContextAccessor.HttpContext?.Request.Headers["X-Client-Subdomain"].FirstOrDefault();
+        return null;
     }
 }
