@@ -9,6 +9,10 @@ using PickleballBookingSystem.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ✅ Fix: Bind to 0.0.0.0:5000 for Render
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 // ✅ FIX: Disable file watching to avoid inotify limit
 builder.Configuration.Sources.Clear();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
@@ -58,7 +62,9 @@ var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<st
         "http://localhost:3000",
         "https://sideout-playground.vercel.app",
         "https://sideoutplayground.vercel.app",
-        "https://pickleball-client2.vercel.app"
+        "https://pickleball-client2.vercel.app",
+        "https://pickle-joe-booking-sys.vercel.app",
+        "https://picklejoe.vercel.app"
     };
 
 builder.Services.AddCors(options =>
