@@ -14,14 +14,34 @@ public class AppDbContext : DbContext
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<BlockedDate> BlockedDates => Set<BlockedDate>();
     public DbSet<PriceRule> PriceRules => Set<PriceRule>();
-    public DbSet<Client> Clients => Set<Client>(); // ✅ NEW
+    public DbSet<Client> Clients => Set<Client>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Lowercase table names
+        // ✅ FULL lowercasing: tables, columns, keys, FKs, indexes
         foreach (var entity in modelBuilder.Model.GetEntityTypes())
         {
             entity.SetTableName(entity.GetTableName()!.ToLower());
+
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(property.GetColumnName().ToLower());
+            }
+
+            foreach (var key in entity.GetKeys())
+            {
+                key.SetName(key.GetName()?.ToLower());
+            }
+
+            foreach (var fk in entity.GetForeignKeys())
+            {
+                fk.SetConstraintName(fk.GetConstraintName()?.ToLower());
+            }
+
+            foreach (var index in entity.GetIndexes())
+            {
+                index.SetDatabaseName(index.GetDatabaseName()?.ToLower());
+            }
         }
 
         // User configuration
@@ -56,7 +76,6 @@ public class AppDbContext : DbContext
                 .HasForeignKey(b => b.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ Court belongs to Client
             e.HasOne(c => c.Client)
                 .WithMany(cl => cl.Courts)
                 .HasForeignKey(c => c.ClientId)
@@ -89,13 +108,11 @@ public class AppDbContext : DbContext
                 .HasForeignKey(s => s.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ Booking belongs to Court
             e.HasOne(b => b.Court)
                 .WithMany(c => c.Bookings)
                 .HasForeignKey(b => b.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ Booking belongs to Client
             e.HasOne(b => b.Client)
                 .WithMany(cl => cl.Bookings)
                 .HasForeignKey(b => b.ClientId)
@@ -105,13 +122,11 @@ public class AppDbContext : DbContext
         // ✅ TimeSlot configuration
         modelBuilder.Entity<TimeSlot>(e =>
         {
-            // TimeSlot belongs to Booking
             e.HasOne(ts => ts.Booking)
                 .WithMany(b => b.Slots)
                 .HasForeignKey(ts => ts.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // TimeSlot belongs to Court (optional)
             e.HasOne(ts => ts.Court)
                 .WithMany(c => c.TimeSlots)
                 .HasForeignKey(ts => ts.CourtId)
@@ -121,13 +136,11 @@ public class AppDbContext : DbContext
         // ✅ BlockedDate configuration
         modelBuilder.Entity<BlockedDate>(e =>
         {
-            // BlockedDate belongs to Court (optional)
             e.HasOne(bd => bd.Court)
                 .WithMany(c => c.BlockedDates)
                 .HasForeignKey(bd => bd.CourtId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // ✅ BlockedDate belongs to Client (optional - if you want client-level blocking)
             e.HasOne(bd => bd.Client)
                 .WithMany()
                 .HasForeignKey(bd => bd.ClientId)
@@ -137,7 +150,6 @@ public class AppDbContext : DbContext
         // ✅ PriceRule configuration
         modelBuilder.Entity<PriceRule>(e =>
         {
-            // PriceRule belongs to Client
             e.HasOne(pr => pr.Client)
                 .WithMany()
                 .HasForeignKey(pr => pr.ClientId)
@@ -153,4 +165,4 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }
-}   
+}
