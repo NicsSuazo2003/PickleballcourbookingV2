@@ -110,11 +110,20 @@ public class AdminController : ControllerBase
         await _court.DeleteCourtAsync(id, clientId);
         return NoContent();
     }
+
     [HttpGet("debug-headers")]
     [AllowAnonymous]
     public IActionResult DebugHeaders()
     {
         var headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString());
         return Ok(headers);
-}
+    }
+
+    [HttpGet("debug-subdomain")]
+    [AllowAnonymous]
+    public IActionResult DebugSubdomain()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        return Ok(new { subdomain, host = Request.Host.Host });
+    }
 }
