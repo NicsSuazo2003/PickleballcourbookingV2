@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
@@ -115,6 +115,6 @@ public class AdminController : ControllerBase
     public IActionResult DebugHeaders()
     {
         var headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString());
-        return Ok(headers)
+        return Ok(headers);
 }
 }
