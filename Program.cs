@@ -9,9 +9,14 @@ using PickleballBookingSystem.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ✅ FIX: Disable file watching to avoid inotify limit
+builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+
+// Database
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// JWT
 var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -68,8 +73,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    
-
+    // await db.Database.MigrateAsync();
 
     DbSeeder.Initialize(db);
 
