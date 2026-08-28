@@ -9,11 +9,9 @@ using PickleballBookingSystem.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Database
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// JWT
 var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -33,7 +31,6 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<EmailService>();
 
-// Services
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICourtService, CourtService>();
@@ -48,7 +45,6 @@ builder.Services.AddScoped<ClientResolver>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddSwaggerGen();
 
-// ✅ CORS - Read from appsettings.json
 var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? new[] {
         "http://localhost:5173",
@@ -69,7 +65,6 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Auto-migrate & seed
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -77,10 +72,24 @@ using (var scope = app.Services.CreateScope())
 
     DbSeeder.Initialize(db);
 
-    // Auto-complete past bookings
-    var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
-    await bookingService.AutoCompletePastBookingsAsync();
-    await bookingService.CancelExpiredPaymentsAsync();
+    var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
+    Guid clientId;
+    try
+    {
+        clientId = await clientService.GetClientIdBySubdomainAsync("picklejoe");
+    }
+    catch
+    {
+        var firstClient = await db.Clients.FirstOrDefaultAsync();
+        clientId = firstClient?.Id ?? Guid.Empty;
+    }
+
+    if (clientId != Guid.Empty)
+    {
+        var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
+        await bookingService.AutoCompletePastBookingsAsync(clientId);
+        await bookingService.CancelExpiredPaymentsAsync(clientId);
+    }
 }
 
 app.UseMiddleware<ExceptionMiddleware>();
