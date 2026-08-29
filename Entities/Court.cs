@@ -9,6 +9,7 @@ public class Court
     public string Type { get; set; } = "indoor";
     public bool Indoor { get; set; }
     public decimal PricePerHour { get; set; }
+    public decimal PeakPricePerHour { get; set; }  // ✅ ADD THIS
     public string AmenitiesRaw { get; set; } = string.Empty;
     public double Rating { get; set; }
     public string ImageUrl { get; set; } = string.Empty;
@@ -35,7 +36,6 @@ public class Court
         set => ImagesRaw = string.Join(',', value);
     }
 
-    // ✅ Navigation Properties
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
     public ICollection<TimeSlot> TimeSlots { get; set; } = new List<TimeSlot>();
     public ICollection<BlockedDate> BlockedDates { get; set; } = new List<BlockedDate>();

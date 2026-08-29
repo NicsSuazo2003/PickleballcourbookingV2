@@ -40,6 +40,7 @@ public class CourtService : ICourtService
             Type = request.Type,
             Indoor = request.Indoor,
             PricePerHour = request.PricePerHour,
+            PeakPricePerHour = request.PeakPricePerHour,  // ✅ ADDED
             Amenities = request.Amenities ?? new List<string>(),
             OpenTime = TimeOnly.Parse(request.OpenTime),
             CloseTime = TimeOnly.Parse(request.CloseTime),
@@ -47,7 +48,7 @@ public class CourtService : ICourtService
             Surface = request.Surface ?? "",
             Status = "active",
             Rating = 0,
-            ClientId = clientId  // ✅ Set ClientId
+            ClientId = clientId
         };
         _db.Courts.Add(court);
         await _db.SaveChangesAsync();
@@ -64,6 +65,7 @@ public class CourtService : ICourtService
         if (request.Type is not null) court.Type = request.Type;
         if (request.Indoor.HasValue) court.Indoor = request.Indoor.Value;
         if (request.PricePerHour.HasValue) court.PricePerHour = request.PricePerHour.Value;
+        if (request.PeakPricePerHour.HasValue) court.PeakPricePerHour = request.PeakPricePerHour.Value;  // ✅ ADDED
         if (request.Amenities is not null) court.Amenities = request.Amenities;
         if (request.ImageUrl is not null) court.ImageUrl = request.ImageUrl;
         if (request.Images is not null) court.Images = request.Images;
@@ -200,7 +202,7 @@ public class CourtService : ICourtService
         var blocked = new BlockedDate
         {
             CourtId = courtId,
-            ClientId = clientId,  // ✅ Set ClientId
+            ClientId = clientId,
             Date = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc),
             StartTime = request.StartTime != null ? TimeOnly.Parse(request.StartTime) : null,
             EndTime = request.EndTime != null ? TimeOnly.Parse(request.EndTime) : null,
@@ -284,7 +286,7 @@ public class CourtService : ICourtService
             EndTime = TimeOnly.Parse(request.EndTime),
             PricePerHour = request.PricePerHour,
             Priority = request.Priority,
-            ClientId = clientId  // ✅ Set ClientId
+            ClientId = clientId
         };
         _db.PriceRules.Add(rule);
         await _db.SaveChangesAsync();
@@ -338,6 +340,7 @@ public class CourtService : ICourtService
         c.Type,
         c.Indoor,
         c.PricePerHour,
+        c.PeakPricePerHour,  // ✅ ADDED
         c.Amenities,
         c.Rating,
         c.ImageUrl,
