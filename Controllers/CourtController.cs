@@ -12,11 +12,16 @@ public class CourtController : ControllerBase
 {
     private readonly ICourtService _court;
     private readonly ClientResolver _clientResolver;
+    private readonly IClientService _clientService;
 
-    public CourtController(ICourtService court, ClientResolver clientResolver)
+    public CourtController(
+        ICourtService court,
+        ClientResolver clientResolver,
+        IClientService clientService)
     {
         _court = court;
         _clientResolver = clientResolver;
+        _clientService = clientService;
     }
 
     private async Task<Guid> GetClientId()
@@ -25,19 +30,7 @@ public class CourtController : ControllerBase
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
-        // You'll need to add a service to get client ID from subdomain
-        // For now, we'll use a placeholder - you'll need to implement this
-        // using your client service
-        return await GetClientIdFromSubdomain(subdomain);
-    }
-
-    private async Task<Guid> GetClientIdFromSubdomain(string subdomain)
-    {
-        // You'll need to implement this with your ClientService
-        // For now, let's assume you have a way to get client ID
-        // This is a placeholder - you need to inject IClientService
-        // and use it here
-        return Guid.Parse("your-client-id"); // Replace with actual logic
+        return await _clientService.GetClientIdBySubdomainAsync(subdomain);
     }
 
     // ========================================
@@ -155,7 +148,8 @@ public class CourtController : ControllerBase
     [HttpGet("legacy/blocked-dates")]
     public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDatesLegacy()
     {
-        return Ok(await _court.GetBlockedDatesAsync(null, Guid.Empty)); // Use appropriate client ID
+        var clientId = await GetClientId();
+        return Ok(await _court.GetBlockedDatesAsync(null, clientId));
     }
 
     [Authorize(Roles = "admin")]
