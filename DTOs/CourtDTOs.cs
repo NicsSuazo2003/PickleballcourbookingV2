@@ -6,7 +6,8 @@ public record CourtDto(
     string Type,
     bool Indoor,
     decimal PricePerHour,
-    decimal PeakPricePerHour,  // ✅ ADDED
+    decimal PeakPricePerHour,
+    string? Description,  // ✅ ADD THIS
     List<string> Amenities,
     double Rating,
     string ImageUrl,
@@ -17,13 +18,13 @@ public record CourtDto(
     string Dimensions,
     string Surface
 );
-
 public record CreateCourtRequest(
     string Name,
     string Type,
     bool Indoor,
     decimal PricePerHour,
-    decimal PeakPricePerHour,  // ✅ ADDED
+    decimal PeakPricePerHour,
+    string? Description,  // ✅ ADD THIS
     List<string>? Amenities,
     string OpenTime,
     string CloseTime,
@@ -36,7 +37,8 @@ public record UpdateCourtRequest(
     string? Type,
     bool? Indoor,
     decimal? PricePerHour,
-    decimal? PeakPricePerHour,  // ✅ ADDED
+    decimal? PeakPricePerHour,
+    string? Description,  // ✅ ADD THIS
     List<string>? Amenities,
     string? ImageUrl,
     List<string>? Images,

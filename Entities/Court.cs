@@ -10,6 +10,7 @@ public class Court
     public bool Indoor { get; set; }
     public decimal PricePerHour { get; set; }
     public decimal PeakPricePerHour { get; set; }  // ✅ ADD THIS
+    public string? Description { get; set; }
     public string AmenitiesRaw { get; set; } = string.Empty;
     public double Rating { get; set; }
     public string ImageUrl { get; set; } = string.Empty;

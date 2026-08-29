@@ -65,7 +65,8 @@ public class CourtService : ICourtService
         if (request.Type is not null) court.Type = request.Type;
         if (request.Indoor.HasValue) court.Indoor = request.Indoor.Value;
         if (request.PricePerHour.HasValue) court.PricePerHour = request.PricePerHour.Value;
-        if (request.PeakPricePerHour.HasValue) court.PeakPricePerHour = request.PeakPricePerHour.Value;  // ✅ ADDED
+        if (request.PeakPricePerHour.HasValue) court.PeakPricePerHour = request.PeakPricePerHour.Value;
+        if (request.Description is not null) court.Description = request.Description;  // ✅ ADD THIS
         if (request.Amenities is not null) court.Amenities = request.Amenities;
         if (request.ImageUrl is not null) court.ImageUrl = request.ImageUrl;
         if (request.Images is not null) court.Images = request.Images;
@@ -78,7 +79,6 @@ public class CourtService : ICourtService
         await _db.SaveChangesAsync();
         return MapToDto(court);
     }
-
     public async Task DeleteCourtAsync(Guid id, Guid clientId)
     {
         var court = await _db.Courts
@@ -341,6 +341,7 @@ public class CourtService : ICourtService
         c.Indoor,
         c.PricePerHour,
         c.PeakPricePerHour,  // ✅ ADDED
+        c.Description,
         c.Amenities,
         c.Rating,
         c.ImageUrl,
