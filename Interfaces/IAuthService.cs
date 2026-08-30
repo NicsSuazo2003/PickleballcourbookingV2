@@ -8,4 +8,5 @@ public interface IAuthService
     Task<AuthResponse> RegisterAsync(RegisterRequest request);
     Task ForgotPasswordAsync(string email);
     Task<UserDto> UpdateProfileAsync(Guid userId, UpdateProfileRequest request);
+    Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request); // ✅ NEW
 }

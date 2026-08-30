@@ -41,4 +41,11 @@ public class AuthController : ControllerBase
         var user = await _auth.UpdateProfileAsync(userId, request);
         return Ok(user);
     }
+    [Authorize, HttpPut("change-password")]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await _auth.ChangePasswordAsync(userId, request);
+        return Ok(new { message = "Password changed successfully" });
+    }
 }

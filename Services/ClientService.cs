@@ -37,4 +37,26 @@ public class ClientService : IClientService
 
 		return client.Id;
 	}
+    public async Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request)
+    {
+        var client = await _db.Clients.FindAsync(clientId)
+            ?? throw new KeyNotFoundException("Client not found");
+
+        if (request.Name is not null) client.Name = request.Name;
+        if (request.GcashNumber is not null) client.GcashNumber = request.GcashNumber;
+        if (request.GcashAccountName is not null) client.GcashAccountName = request.GcashAccountName;
+
+        await _db.SaveChangesAsync();
+
+        return new ClientDto(
+            client.Id.ToString(),
+            client.Name,
+            client.Subdomain,
+            client.LogoUrl,
+            client.PrimaryColor,
+            client.AccentColor,
+            client.GcashNumber,
+            client.GcashAccountName
+        );
+    }
 }

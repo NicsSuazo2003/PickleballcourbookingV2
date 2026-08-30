@@ -6,6 +6,7 @@ public interface IClientService
 {
     Task<ClientDto> GetClientBySubdomainAsync(string subdomain);
     Task<Guid> GetClientIdBySubdomainAsync(string subdomain);
+    Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request); // ✅ NEW
 }
 
 public record ClientDto(

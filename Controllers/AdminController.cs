@@ -126,4 +126,19 @@ public class AdminController : ControllerBase
         var subdomain = _clientResolver.GetSubdomain();
         return Ok(new { subdomain, host = Request.Host.Host });
     }
+    [HttpGet("settings")]
+    public async Task<ActionResult<ClientDto>> GetSettings()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        var client = await _clientService.GetClientBySubdomainAsync(subdomain!);
+        return Ok(client);
+    }
+
+    [HttpPut("settings")]
+    public async Task<ActionResult<ClientDto>> UpdateSettings(UpdateClientSettingsRequest request)
+    {
+        var clientId = await GetClientId();
+        var client = await _clientService.UpdateClientSettingsAsync(clientId, request);
+        return Ok(client);
+    }
 }
