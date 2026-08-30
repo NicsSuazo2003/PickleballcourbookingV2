@@ -78,11 +78,12 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Program.cs - Update the initialization section
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    // await db.Database.MigrateAsync();
 
+  
     DbSeeder.Initialize(db);
 
     var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();

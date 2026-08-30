@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
@@ -12,12 +13,18 @@ public class BookingController : ControllerBase
     private readonly IBookingService _booking;
     private readonly IConfiguration _config;
     private readonly ClientResolver _clientResolver;
+    private readonly IClientService _clientService; // ✅ Add this
 
-    public BookingController(IBookingService booking, IConfiguration config, ClientResolver clientResolver)
+    public BookingController(
+        IBookingService booking,
+        IConfiguration config,
+        ClientResolver clientResolver,
+        IClientService clientService) // ✅ Inject this
     {
         _booking = booking;
         _config = config;
         _clientResolver = clientResolver;
+        _clientService = clientService; // ✅ Store it
     }
 
     private async Task<Guid> GetClientId()
@@ -26,10 +33,15 @@ public class BookingController : ControllerBase
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
-        // You'll need to implement this with your ClientService
-        // This is a placeholder - you need to inject IClientService
-        // and use it here
-        return Guid.Parse("your-client-id"); // Replace with actual logic
+        // ✅ Use the actual client service to get the client ID
+        try
+        {
+            return await _clientService.GetClientIdBySubdomainAsync(subdomain);
+        }
+        catch (KeyNotFoundException)
+        {
+            throw new UnauthorizedAccessException($"Client not found for subdomain: {subdomain}");
+        }
     }
 
     [HttpPost]
