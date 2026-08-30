@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PickleballBookingSystem.Data;
@@ -38,6 +39,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
     });
+
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<EmailService>();
@@ -54,6 +56,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientResolver>();
 builder.Services.AddScoped<IClientService, ClientService>();
+
+// ✅ Add Health Checks
+builder.Services.AddHealthChecks();
+
 builder.Services.AddSwaggerGen();
 
 var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
@@ -78,12 +84,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Program.cs - Update the initialization section
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-  
     DbSeeder.Initialize(db);
 
     var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
@@ -115,4 +118,14 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"healthy\"}");
+    }
+});
+
 app.Run();
