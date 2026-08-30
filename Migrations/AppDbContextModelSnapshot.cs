@@ -55,7 +55,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasIndex("CourtId");
 
-                    b.ToTable("blockeddates");
+                    b.ToTable("blockeddates", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.Booking", b =>
@@ -122,7 +122,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("bookings");
+                    b.ToTable("bookings", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.Client", b =>
@@ -165,7 +165,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("clients");
+                    b.ToTable("clients", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.Court", b =>
@@ -228,7 +228,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasIndex("ClientId");
 
-                    b.ToTable("courts");
+                    b.ToTable("courts", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.Notification", b =>
@@ -262,7 +262,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("notifications");
+                    b.ToTable("notifications", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.PriceRule", b =>
@@ -301,7 +301,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasIndex("ClientId");
 
-                    b.ToTable("pricerules");
+                    b.ToTable("pricerules", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.TimeSlot", b =>
@@ -331,7 +331,7 @@ namespace PickleballBookingSystem.Migrations
 
                     b.HasIndex("CourtId");
 
-                    b.ToTable("timeslots");
+                    b.ToTable("timeslots", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.User", b =>
@@ -378,7 +378,7 @@ namespace PickleballBookingSystem.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("users");
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.BlockedDate", b =>

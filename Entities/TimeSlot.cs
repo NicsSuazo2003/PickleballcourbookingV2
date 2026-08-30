@@ -12,6 +12,7 @@ public class TimeSlot
     public DateTime Date { get; set; }
     public TimeOnly StartTime { get; set; }
     public TimeOnly EndTime { get; set; }
+    public decimal Price { get; set; }
 
     public Booking Booking { get; set; } = null!;
 }

@@ -39,7 +39,8 @@ public record TimeSlotDto(
     string Date,
     string StartTime,
     string EndTime,
-    bool IsAvailable
+    bool IsAvailable,
+    decimal Price
 );
 
 public record AdminUpdateBookingRequest(string Status);

@@ -19,6 +19,22 @@ public class BookingService : IBookingService
         _config = config;
     }
 
+    // ✅ Helper method to calculate slot price
+    private static decimal CalculateSlotPrice(Court court, TimeOnly startTime, TimeOnly endTime, DateTime date)
+    {
+        // Check if it's peak hours (5 PM - 9 PM)
+        var isPeak = startTime >= new TimeOnly(17, 0) && endTime <= new TimeOnly(21, 0);
+
+        // Check if it's weekend (Saturday or Sunday)
+        var isWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
+
+        var basePrice = isPeak ? court.PeakPricePerHour : court.PricePerHour;
+        if (isWeekend) basePrice *= 1.2m; // 20% weekend surcharge
+
+        var hours = (decimal)(endTime - startTime).TotalHours;
+        return Math.Round(basePrice * hours, 2);
+    }
+
     public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
     {
         var bookingDate = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc);
@@ -56,7 +72,7 @@ public class BookingService : IBookingService
         var booking = new Booking
         {
             CourtId = court.Id,
-            ClientId = clientId,  // ✅ Set ClientId
+            ClientId = clientId,
             CustomerName = request.CustomerName,
             CustomerEmail = request.CustomerEmail,
             CustomerPhone = request.CustomerPhone,
@@ -67,12 +83,14 @@ public class BookingService : IBookingService
             PaymentMethod = bookingStatus == "confirmed" ? "cash" : "gcash",
             Notes = request.Notes,
             CreatedAt = DateTime.UtcNow,
+            // ✅ Store price per slot
             Slots = request.Slots.Select(s => new TimeSlot
             {
                 CourtId = court.Id,
                 Date = bookingDate,
                 StartTime = TimeOnly.Parse(s.StartTime),
-                EndTime = TimeOnly.Parse(s.EndTime)
+                EndTime = TimeOnly.Parse(s.EndTime),
+                Price = CalculateSlotPrice(court, TimeOnly.Parse(s.StartTime), TimeOnly.Parse(s.EndTime), bookingDate)
             }).ToList()
         };
 
@@ -204,6 +222,7 @@ public class BookingService : IBookingService
         await _db.SaveChangesAsync();
     }
 
+    // ✅ Updated MapToDto with Price
     private static BookingDto MapToDto(Booking b) => new(
         b.Id.ToString(),
         b.CourtId.ToString(),
@@ -218,7 +237,8 @@ public class BookingService : IBookingService
             s.Date.ToString("yyyy-MM-dd"),
             s.StartTime.ToString("HH:mm"),
             s.EndTime.ToString("HH:mm"),
-            false
+            false,
+            s.Price // ✅ Include the stored price
         )).ToList(),
         b.TotalAmount,
         b.Status,
