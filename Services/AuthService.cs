@@ -4,6 +4,7 @@ using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
 using PickleballBookingSystem.Interfaces;
+using BCrypt.Net;
 
 namespace PickleballBookingSystem.Services;
 
