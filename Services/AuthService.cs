@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Services/AuthService.cs
+using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
@@ -31,7 +32,7 @@ public class AuthService : IAuthService
         return new AuthResponse(_tokenService.GenerateToken(user), MapToDto(user));
     }
 
-    // Services/AuthService.cs
+    // ✅ RegisterAsync with clientId
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request, Guid clientId)
     {
         if (await _db.Users.AnyAsync(u => u.Email == request.Email))
@@ -44,7 +45,31 @@ public class AuthService : IAuthService
             Phone = request.Phone,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = "user",
-            ClientId = clientId,  // ✅ Set ClientId
+            ClientId = clientId,
+            CreatedAt = DateTime.UtcNow,
+            Status = "active"
+        };
+
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        return new AuthResponse(_tokenService.GenerateToken(user), MapToDto(user));
+    }
+
+    // ✅ RegisterStaffAsync with clientId
+    public async Task<AuthResponse> RegisterStaffAsync(RegisterRequest request, Guid clientId)
+    {
+        if (await _db.Users.AnyAsync(u => u.Email == request.Email))
+            throw new InvalidOperationException("An account with this email already exists");
+
+        var user = new User
+        {
+            Name = request.Name,
+            Email = request.Email,
+            Phone = request.Phone,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Role = "staff",
+            ClientId = clientId,
             CreatedAt = DateTime.UtcNow,
             Status = "active"
         };
@@ -75,17 +100,6 @@ public class AuthService : IAuthService
         return MapToDto(user);
     }
 
-    private static UserDto MapToDto(User u) => new(
-        u.Id.ToString(),
-        u.Name,
-        u.Email,
-        u.Phone,
-        u.Role,
-        u.Avatar,
-        u.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-        u.BookingsCount,
-        u.Status
-    );
     public async Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
     {
         var user = await _db.Users.FindAsync(userId)
@@ -100,26 +114,16 @@ public class AuthService : IAuthService
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         await _db.SaveChangesAsync();
     }
-    // Services/AuthService.cs - Add this method
-    public async Task<AuthResponse> RegisterStaffAsync(RegisterRequest request)
-    {
-        if (await _db.Users.AnyAsync(u => u.Email == request.Email))
-            throw new InvalidOperationException("An account with this email already exists");
 
-        var user = new User
-        {
-            Name = request.Name,
-            Email = request.Email,
-            Phone = request.Phone,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Role = "staff",  // ✅ Staff role
-            CreatedAt = DateTime.UtcNow,
-            Status = "active"
-        };
-
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync();
-
-        return new AuthResponse(_tokenService.GenerateToken(user), MapToDto(user));
-    }
+    private static UserDto MapToDto(User u) => new(
+        u.Id.ToString(),
+        u.Name,
+        u.Email,
+        u.Phone,
+        u.Role,
+        u.Avatar,
+        u.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        u.BookingsCount,
+        u.Status
+    );
 }

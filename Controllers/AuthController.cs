@@ -1,8 +1,10 @@
-﻿using System.Security.Claims;
+﻿// Controllers/AuthController.cs
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
+using PickleballBookingSystem.Middleware;
 
 namespace PickleballBookingSystem.Controllers;
 
@@ -10,8 +12,24 @@ namespace PickleballBookingSystem.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
+    private readonly ClientResolver _clientResolver;
+    private readonly IClientService _clientService;
 
-    public AuthController(IAuthService auth) => _auth = auth;
+    public AuthController(IAuthService auth, ClientResolver clientResolver, IClientService clientService)
+    {
+        _auth = auth;
+        _clientResolver = clientResolver;
+        _clientService = clientService;
+    }
+
+    private async Task<Guid> GetClientId()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        if (string.IsNullOrEmpty(subdomain))
+            throw new UnauthorizedAccessException("Client identification required");
+
+        return await _clientService.GetClientIdBySubdomainAsync(subdomain);
+    }
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
@@ -23,7 +41,17 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
     {
-        var response = await _auth.RegisterAsync(request);
+        var clientId = await GetClientId();
+        var response = await _auth.RegisterAsync(request, clientId);
+        return Ok(response);
+    }
+
+    [HttpPost("register-staff")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<AuthResponse>> RegisterStaff(RegisterRequest request)
+    {
+        var clientId = await GetClientId();
+        var response = await _auth.RegisterStaffAsync(request, clientId);
         return Ok(response);
     }
 
@@ -41,6 +69,7 @@ public class AuthController : ControllerBase
         var user = await _auth.UpdateProfileAsync(userId, request);
         return Ok(user);
     }
+
     [Authorize, HttpPut("change-password")]
     public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
     {
