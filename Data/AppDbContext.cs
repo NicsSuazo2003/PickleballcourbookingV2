@@ -19,21 +19,27 @@ public class AppDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // ✅ Table names are genuinely all-lowercase in Supabase — keep this.
-        // Columns are NOT globally lowercase (see explicit overrides below),
-        // so do NOT lowercase properties/keys/FKs/indexes here.
         foreach (var entity in modelBuilder.Model.GetEntityTypes())
         {
             entity.SetTableName(entity.GetTableName()!.ToLower());
         }
 
-        // User configuration
+        // ✅ User configuration (FIXED)
         modelBuilder.Entity<User>(e =>
         {
             e.HasIndex(u => u.Email).IsUnique();
+
+            // ✅ Map ClientId to client_id column
+            e.Property(u => u.ClientId).HasColumnName("client_id");
+
+            // ✅ Relationship with Client
+            e.HasOne(u => u.Client)
+                .WithMany()
+                .HasForeignKey(u => u.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ✅ Client entity — this table was created manually with snake_case columns.
-        // Every other table keeps EF's default PascalCase column names.
+        // ✅ Client entity — snake_case columns
         modelBuilder.Entity<Client>(e =>
         {
             e.Property(c => c.Id).HasColumnName("id");
@@ -66,7 +72,6 @@ public class AppDbContext : DbContext
                 .HasForeignKey(b => b.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ Court belongs to Client — client_id column is snake_case
             e.Property(c => c.ClientId).HasColumnName("client_id");
             e.HasOne(c => c.Client)
                 .WithMany(cl => cl.Courts)
@@ -100,13 +105,11 @@ public class AppDbContext : DbContext
                 .HasForeignKey(s => s.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ Booking belongs to Court
             e.HasOne(b => b.Court)
                 .WithMany(c => c.Bookings)
                 .HasForeignKey(b => b.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ Booking belongs to Client — client_id column is snake_case
             e.Property(b => b.ClientId).HasColumnName("client_id");
             e.HasOne(b => b.Client)
                 .WithMany(cl => cl.Bookings)
@@ -136,7 +139,6 @@ public class AppDbContext : DbContext
                 .HasForeignKey(bd => bd.CourtId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // ✅ BlockedDate belongs to Client — client_id column is snake_case
             e.Property(bd => bd.ClientId).HasColumnName("client_id");
             e.HasOne(bd => bd.Client)
                 .WithMany()
@@ -147,7 +149,6 @@ public class AppDbContext : DbContext
         // ✅ PriceRule configuration
         modelBuilder.Entity<PriceRule>(e =>
         {
-            // PriceRule belongs to Client — client_id column is snake_case
             e.Property(pr => pr.ClientId).HasColumnName("client_id");
             e.HasOne(pr => pr.Client)
                 .WithMany()
