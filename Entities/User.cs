@@ -1,3 +1,4 @@
+// Entities/User.cs
 namespace PickleballBookingSystem.Entities;
 
 public class User
@@ -7,7 +8,7 @@ public class User
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
-    public string Role { get; set; } = "user";
+    public string Role { get; set; } = "staff";  // ✅ Changed default to "staff"
     public string? Avatar { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int BookingsCount { get; set; }

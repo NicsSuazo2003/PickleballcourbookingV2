@@ -1,3 +1,4 @@
+// Controllers/AdminController.cs
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PickleballBookingSystem.DTOs;
@@ -7,7 +8,6 @@ using PickleballBookingSystem.Middleware;
 namespace PickleballBookingSystem.Controllers;
 
 [ApiController, Route("api/admin")]
-[Authorize(Roles = "admin")]
 public class AdminController : ControllerBase
 {
     private readonly IAdminService _admin;
@@ -39,23 +39,12 @@ public class AdminController : ControllerBase
         return await _clientService.GetClientIdBySubdomainAsync(subdomain);
     }
 
-    [HttpGet("analytics")]
-    public async Task<ActionResult<AnalyticsDto>> GetAnalytics()
-    {
-        var clientId = await GetClientId();
-        var analytics = await _admin.GetAnalyticsAsync(clientId);
-        return Ok(analytics);
-    }
-
-    [HttpGet("analytics/courts")]
-    public async Task<ActionResult<List<CourtAnalyticsDto>>> GetCourtAnalytics()
-    {
-        var clientId = await GetClientId();
-        var analytics = await _admin.GetCourtAnalyticsAsync(clientId);
-        return Ok(analytics);
-    }
+    // ========================================
+    // ✅ STAFF & ADMIN ACCESS
+    // ========================================
 
     [HttpGet("bookings")]
+    [Authorize(Roles = "admin,staff")]  // ✅ Allow both roles
     public async Task<ActionResult<List<BookingDto>>> GetBookings()
     {
         var clientId = await GetClientId();
@@ -64,6 +53,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpPut("bookings/{id}")]
+    [Authorize(Roles = "admin,staff")]  // ✅ Allow both roles
     public async Task<ActionResult<BookingDto>> UpdateBooking(Guid id, AdminUpdateBookingRequest request)
     {
         var clientId = await GetClientId();
@@ -71,7 +61,30 @@ public class AdminController : ControllerBase
         return Ok(booking);
     }
 
+    // ========================================
+    // ✅ ADMIN ONLY ACCESS
+    // ========================================
+
+    [HttpGet("analytics")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
+    public async Task<ActionResult<AnalyticsDto>> GetAnalytics()
+    {
+        var clientId = await GetClientId();
+        var analytics = await _admin.GetAnalyticsAsync(clientId);
+        return Ok(analytics);
+    }
+
+    [HttpGet("analytics/courts")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
+    public async Task<ActionResult<List<CourtAnalyticsDto>>> GetCourtAnalytics()
+    {
+        var clientId = await GetClientId();
+        var analytics = await _admin.GetCourtAnalyticsAsync(clientId);
+        return Ok(analytics);
+    }
+
     [HttpGet("courts")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
     public async Task<ActionResult<List<CourtDto>>> GetCourts()
     {
         var clientId = await GetClientId();
@@ -80,6 +93,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("courts/{id}")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
     public async Task<ActionResult<CourtDto>> GetCourt(Guid id)
     {
         var clientId = await GetClientId();
@@ -88,6 +102,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpPost("courts")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
     public async Task<ActionResult<CourtDto>> CreateCourt(CreateCourtRequest request)
     {
         var clientId = await GetClientId();
@@ -96,6 +111,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpPut("courts/{id}")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
     public async Task<ActionResult<CourtDto>> UpdateCourt(Guid id, UpdateCourtRequest request)
     {
         var clientId = await GetClientId();
@@ -104,12 +120,35 @@ public class AdminController : ControllerBase
     }
 
     [HttpDelete("courts/{id}")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
     public async Task<IActionResult> DeleteCourt(Guid id)
     {
         var clientId = await GetClientId();
         await _court.DeleteCourtAsync(id, clientId);
         return NoContent();
     }
+
+    [HttpGet("settings")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
+    public async Task<ActionResult<ClientDto>> GetSettings()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        var client = await _clientService.GetClientBySubdomainAsync(subdomain!);
+        return Ok(client);
+    }
+
+    [HttpPut("settings")]
+    [Authorize(Roles = "admin")]  // ✅ Admin only
+    public async Task<ActionResult<ClientDto>> UpdateSettings(UpdateClientSettingsRequest request)
+    {
+        var clientId = await GetClientId();
+        var client = await _clientService.UpdateClientSettingsAsync(clientId, request);
+        return Ok(client);
+    }
+
+    // ========================================
+    // ⚠️ DEBUG ENDPOINTS
+    // ========================================
 
     [HttpGet("debug-headers")]
     [AllowAnonymous]
@@ -125,20 +164,5 @@ public class AdminController : ControllerBase
     {
         var subdomain = _clientResolver.GetSubdomain();
         return Ok(new { subdomain, host = Request.Host.Host });
-    }
-    [HttpGet("settings")]
-    public async Task<ActionResult<ClientDto>> GetSettings()
-    {
-        var subdomain = _clientResolver.GetSubdomain();
-        var client = await _clientService.GetClientBySubdomainAsync(subdomain!);
-        return Ok(client);
-    }
-
-    [HttpPut("settings")]
-    public async Task<ActionResult<ClientDto>> UpdateSettings(UpdateClientSettingsRequest request)
-    {
-        var clientId = await GetClientId();
-        var client = await _clientService.UpdateClientSettingsAsync(clientId, request);
-        return Ok(client);
     }
 }

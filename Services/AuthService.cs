@@ -98,4 +98,26 @@ public class AuthService : IAuthService
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         await _db.SaveChangesAsync();
     }
+    // Services/AuthService.cs - Add this method
+    public async Task<AuthResponse> RegisterStaffAsync(RegisterRequest request)
+    {
+        if (await _db.Users.AnyAsync(u => u.Email == request.Email))
+            throw new InvalidOperationException("An account with this email already exists");
+
+        var user = new User
+        {
+            Name = request.Name,
+            Email = request.Email,
+            Phone = request.Phone,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Role = "staff",  // ✅ Staff role
+            CreatedAt = DateTime.UtcNow,
+            Status = "active"
+        };
+
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        return new AuthResponse(_tokenService.GenerateToken(user), MapToDto(user));
+    }
 }
