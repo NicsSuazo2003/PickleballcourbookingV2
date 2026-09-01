@@ -62,6 +62,7 @@ builder.Services.AddHealthChecks();
 
 builder.Services.AddSwaggerGen();
 
+// ✅ UPDATED: Added new frontend domain to CORS allowed origins
 var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? new[] {
         "http://localhost:5173",
@@ -69,7 +70,8 @@ var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<st
         "https://sideout-playground.vercel.app",
         "https://sideoutplayground.vercel.app",
         "https://pickleball-client2.vercel.app",
-        "https://pickle-joe-booking-sys.vercel.app",
+        "https://pickle-joe-booking-sys.vercel.app",      // Old domain
+        "https://centercourt-booking.vercel.app",         // ✅ NEW domain
         "https://picklejoe.vercel.app"
     };
 
