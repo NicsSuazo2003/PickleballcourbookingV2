@@ -26,6 +26,30 @@ public record CourtAnalyticsDto(
     int PendingBookings,
     double UtilizationRate
 );
+// DTOs/AdminDTOs.cs
+public record CreateStaffRequest(
+    string Name,
+    string Email,
+    string Phone,
+    string Password
+);
+
+public record UpdateStaffStatusRequest(
+    string Status  // "active" or "suspended"
+);
+
+// Add this to UserDto if not already present
+public record UserDto(
+    string Id,
+    string Name,
+    string Email,
+    string Phone,
+    string Role,
+    string? Avatar,
+    string CreatedAt,
+    int BookingsCount,
+    string Status
+);
 
 public record RevenueByDayDto(string Date, decimal Revenue);
 public record BookingsByDayDto(string Date, int Bookings);

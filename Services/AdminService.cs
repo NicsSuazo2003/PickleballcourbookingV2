@@ -1,7 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
+using PickleballBookingSystem.Entities;
 using PickleballBookingSystem.Interfaces;
+using BCrypt.Net;
 
 namespace PickleballBookingSystem.Services;
 
@@ -10,6 +12,10 @@ public class AdminService : IAdminService
     private readonly AppDbContext _db;
 
     public AdminService(AppDbContext db) => _db = db;
+
+    // ========================================
+    // ANALYTICS
+    // ========================================
 
     public async Task<AnalyticsDto> GetAnalyticsAsync(Guid clientId)
     {
@@ -25,13 +31,11 @@ public class AdminService : IAdminService
         var totalBookings = bookings.Count;
         var activeUsers = bookings.Select(b => b.CustomerEmail).Distinct().Count();
 
-        // ✅ NEW - status counts
         var confirmedBookings = bookings.Count(b => b.Status == "confirmed");
         var pendingPayments = bookings.Count(b => b.Status == "pending_payment" || b.Status == "payment_submitted");
         var completedBookings = bookings.Count(b => b.Status == "completed");
         var cancelledBookings = bookings.Count(b => b.Status == "cancelled" || b.Status == "rejected");
 
-        // ✅ NEW - full breakdown by exact status string
         var statusBreakdown = bookings
             .GroupBy(b => b.Status)
             .ToDictionary(g => g.Key, g => g.Count());
@@ -103,4 +107,83 @@ public class AdminService : IAdminService
 
         return result;
     }
+
+    // ========================================
+    // ✅ STAFF MANAGEMENT
+    // ========================================
+
+    public async Task<List<UserDto>> GetStaffByClientAsync(Guid clientId)
+    {
+        var staff = await _db.Users
+            .Where(u => u.ClientId == clientId && u.Role == "staff")
+            .OrderByDescending(u => u.CreatedAt)
+            .ToListAsync();
+
+        return staff.Select(MapToUserDto).ToList();
+    }
+
+    public async Task<UserDto> CreateStaffAsync(CreateStaffRequest request, Guid clientId)
+    {
+        // Check if user already exists for this client
+        if (await _db.Users.AnyAsync(u => u.Email == request.Email && u.ClientId == clientId))
+            throw new InvalidOperationException("A user with this email already exists for this client.");
+
+        // Check if user exists globally (optional)
+        if (await _db.Users.AnyAsync(u => u.Email == request.Email))
+            throw new InvalidOperationException("This email is already registered.");
+
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Name = request.Name,
+            Email = request.Email,
+            Phone = request.Phone ?? string.Empty,
+            PasswordHash = BCrypt.HashPassword(request.Password),
+            Role = "staff",
+            ClientId = clientId,
+            Status = "active",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        return MapToUserDto(user);
+    }
+
+    public async Task UpdateStaffStatusAsync(Guid userId, string status, Guid clientId)
+    {
+        var user = await _db.Users
+            .FirstOrDefaultAsync(u => u.Id == userId && u.ClientId == clientId && u.Role == "staff")
+            ?? throw new KeyNotFoundException("Staff member not found");
+
+        user.Status = status;
+        await _db.SaveChangesAsync();
+    }
+
+    public async Task DeleteStaffAsync(Guid userId, Guid clientId)
+    {
+        var user = await _db.Users
+            .FirstOrDefaultAsync(u => u.Id == userId && u.ClientId == clientId && u.Role == "staff")
+            ?? throw new KeyNotFoundException("Staff member not found");
+
+        _db.Users.Remove(user);
+        await _db.SaveChangesAsync();
+    }
+
+    // ========================================
+    // PRIVATE HELPERS
+    // ========================================
+
+    private static UserDto MapToUserDto(User u) => new(
+        u.Id.ToString(),
+        u.Name,
+        u.Email,
+        u.Phone ?? string.Empty,
+        u.Role,
+        u.Avatar,
+        u.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        u.BookingsCount,
+        u.Status
+    );
 }

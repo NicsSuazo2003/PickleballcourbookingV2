@@ -8,11 +8,15 @@ public class User
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
-    public string Role { get; set; } = "staff";  // ✅ Changed default to "staff"
+    public string Role { get; set; } = "staff";
     public string? Avatar { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int BookingsCount { get; set; }
     public string Status { get; set; } = "active";
+
+    // ✅ Add ClientId to associate user with a client
+    public Guid ClientId { get; set; }
+    public Client? Client { get; set; }
 
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();

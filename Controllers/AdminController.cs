@@ -165,4 +165,41 @@ public class AdminController : ControllerBase
         var subdomain = _clientResolver.GetSubdomain();
         return Ok(new { subdomain, host = Request.Host.Host });
     }
+    // Controllers/AdminController.cs - Add these endpoints
+
+    [HttpGet("staff")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<List<UserDto>>> GetStaff()
+    {
+        var clientId = await GetClientId();
+        var users = await _admin.GetStaffByClientAsync(clientId);
+        return Ok(users);
+    }
+
+    [HttpPost("staff")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<UserDto>> CreateStaff(CreateStaffRequest request)
+    {
+        var clientId = await GetClientId();
+        var user = await _admin.CreateStaffAsync(request, clientId);
+        return Ok(user);
+    }
+
+    [HttpPut("staff/{id}/status")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult> UpdateStaffStatus(Guid id, UpdateStaffStatusRequest request)
+    {
+        var clientId = await GetClientId();
+        await _admin.UpdateStaffStatusAsync(id, request.Status, clientId);
+        return Ok(new { message = "Staff status updated" });
+    }
+
+    [HttpDelete("staff/{id}")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult> DeleteStaff(Guid id)
+    {
+        var clientId = await GetClientId();
+        await _admin.DeleteStaffAsync(id, clientId);
+        return Ok(new { message = "Staff removed" });
+    }
 }

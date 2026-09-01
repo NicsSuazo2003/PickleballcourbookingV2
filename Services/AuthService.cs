@@ -31,7 +31,8 @@ public class AuthService : IAuthService
         return new AuthResponse(_tokenService.GenerateToken(user), MapToDto(user));
     }
 
-    public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
+    // Services/AuthService.cs
+    public async Task<AuthResponse> RegisterAsync(RegisterRequest request, Guid clientId)
     {
         if (await _db.Users.AnyAsync(u => u.Email == request.Email))
             throw new InvalidOperationException("An account with this email already exists");
@@ -43,6 +44,7 @@ public class AuthService : IAuthService
             Phone = request.Phone,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = "user",
+            ClientId = clientId,  // ✅ Set ClientId
             CreatedAt = DateTime.UtcNow,
             Status = "active"
         };
