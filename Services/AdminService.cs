@@ -138,7 +138,7 @@ public class AdminService : IAdminService
             Name = request.Name,
             Email = request.Email,
             Phone = request.Phone ?? string.Empty,
-            PasswordHash = BCrypt.HashPassword(request.Password),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = "staff",
             ClientId = clientId,
             Status = "active",
