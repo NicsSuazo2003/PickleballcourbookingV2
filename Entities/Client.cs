@@ -1,3 +1,6 @@
+// Entities/Client.cs
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace PickleballBookingSystem.Entities;
 
 public class Client
@@ -10,9 +13,12 @@ public class Client
     public string AccentColor { get; set; } = "#C9A94E";
     public string? GcashNumber { get; set; }
     public string? GcashAccountName { get; set; }
+
+    [Column(TypeName = "jsonb")] // ✅ Add this attribute
+    public string? PaymentMethods { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public string Status { get; set; } = "active";
-    public string? PaymentMethods { get; set; }
 
     public ICollection<Court> Courts { get; set; } = new List<Court>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
