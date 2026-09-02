@@ -54,4 +54,9 @@ public record UserDto(
 public record RevenueByDayDto(string Date, decimal Revenue);
 public record BookingsByDayDto(string Date, int Bookings);
 public record AdminUpdateUserRequest(string? Name, string? Email, string? Role, string? Status);
-public record UpdateClientSettingsRequest(string? Name, string? GcashNumber, string? GcashAccountName);
+public record UpdateClientSettingsRequest(
+    string? Name,
+    string? GcashNumber,
+    string? GcashAccountName,
+    object? PaymentMethods // ✅ Add this
+);

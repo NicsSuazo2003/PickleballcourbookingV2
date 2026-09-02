@@ -50,6 +50,7 @@ public class AppDbContext : DbContext
             e.Property(c => c.AccentColor).HasColumnName("accent_color");
             e.Property(c => c.GcashNumber).HasColumnName("gcash_number");
             e.Property(c => c.GcashAccountName).HasColumnName("gcash_account_name");
+            e.Property(c => c.PaymentMethods).HasColumnName("payment_methods");
             e.Property(c => c.CreatedAt).HasColumnName("created_at");
             e.Property(c => c.Status).HasColumnName("status");
 

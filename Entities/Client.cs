@@ -12,6 +12,7 @@ public class Client
     public string? GcashAccountName { get; set; }
     public DateTime CreatedAt { get; set; }
     public string Status { get; set; } = "active";
+    public string? PaymentMethods { get; set; }
 
     public ICollection<Court> Courts { get; set; } = new List<Court>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
