@@ -4,6 +4,7 @@ using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using System.Text.Json;
+using NpgsqlTypes; // ✅ Add this
 
 namespace PickleballBookingSystem.Services;
 
@@ -49,10 +50,17 @@ public class ClientService : IClientService
         if (request.GcashNumber is not null) client.GcashNumber = request.GcashNumber;
         if (request.GcashAccountName is not null) client.GcashAccountName = request.GcashAccountName;
 
-        // ✅ Save payment methods as JSON
+        // ✅ Fix: Save payment methods as JSONB using proper casting
         if (request.PaymentMethods is not null)
         {
-            client.PaymentMethods = JsonSerializer.Serialize(request.PaymentMethods);
+            var jsonString = JsonSerializer.Serialize(request.PaymentMethods);
+            // Use EF.Functions to cast to jsonb
+            client.PaymentMethods = jsonString;
+
+            // Alternatively, use raw SQL for update
+            // await _db.Database.ExecuteSqlRawAsync(
+            //     "UPDATE clients SET payment_methods = CAST({0} AS jsonb) WHERE id = {1}",
+            //     jsonString, clientId);
         }
 
         await _db.SaveChangesAsync();
