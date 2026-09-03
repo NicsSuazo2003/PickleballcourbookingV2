@@ -89,7 +89,7 @@ public class BookingController : ControllerBase
             return BadRequest(new { message = "Upload failed" });
 
         var screenshotUrl = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
-        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl, paymentReference, clientId);
+        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl, paymentReference, clientId); // ✅ Pass paymentReference
         return Ok(booking);
     }
 
