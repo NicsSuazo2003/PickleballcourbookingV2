@@ -23,6 +23,9 @@ public class Booking
     public string? Notes { get; set; }
     public Guid ClientId { get; set; }
     public Client Client { get; set; } = null!;
+    public Guid? OpenPlaySessionId { get; set; }
+    public OpenPlaySession? OpenPlaySession { get; set; }
+
 
     public ICollection<TimeSlot> Slots { get; set; } = new List<TimeSlot>();
 }   

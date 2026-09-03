@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<BlockedDate> BlockedDates => Set<BlockedDate>();
     public DbSet<PriceRule> PriceRules => Set<PriceRule>();
     public DbSet<Client> Clients => Set<Client>();
+    public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>(); // ✅ NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -119,6 +120,13 @@ public class AppDbContext : DbContext
                 .WithMany(cl => cl.Bookings)
                 .HasForeignKey(b => b.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ NEW - Open Play link
+            e.Property(b => b.OpenPlaySessionId).HasColumnName("open_play_session_id");
+            e.HasOne(b => b.OpenPlaySession)
+                .WithMany(s => s.Bookings)
+                .HasForeignKey(b => b.OpenPlaySessionId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ✅ TimeSlot configuration
@@ -166,6 +174,36 @@ public class AppDbContext : DbContext
             e.HasOne(n => n.User)
                 .WithMany(u => u.Notifications)
                 .HasForeignKey(n => n.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ✅ NEW - OpenPlaySession configuration
+        modelBuilder.Entity<OpenPlaySession>(e =>
+        {
+            e.Property(s => s.ClientId).HasColumnName("client_id");
+            e.Property(s => s.CourtId).HasColumnName("court_id");
+            e.Property(s => s.Date).HasColumnName("date");
+            e.Property(s => s.StartTime).HasColumnName("start_time");
+            e.Property(s => s.EndTime).HasColumnName("end_time");
+            e.Property(s => s.MaxPlayers).HasColumnName("max_players");
+            e.Property(s => s.CurrentPlayers).HasColumnName("current_players");
+            e.Property(s => s.PricePerPlayer)
+                .HasColumnName("price_per_player")
+                .HasColumnType("decimal(10,2)");
+            e.Property(s => s.SkillLevel).HasColumnName("skill_level");
+            e.Property(s => s.HostName).HasColumnName("host_name");
+            e.Property(s => s.Description).HasColumnName("description");
+            e.Property(s => s.IsActive).HasColumnName("is_active");
+            e.Property(s => s.CreatedAt).HasColumnName("created_at");
+
+            e.HasOne(s => s.Client)
+                .WithMany()
+                .HasForeignKey(s => s.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(s => s.Court)
+                .WithMany()
+                .HasForeignKey(s => s.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }
