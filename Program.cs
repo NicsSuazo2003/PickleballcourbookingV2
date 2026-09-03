@@ -87,6 +87,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// ✅ FIX: Make this async properly
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
