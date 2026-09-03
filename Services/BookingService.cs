@@ -10,121 +10,201 @@ public class BookingService : IBookingService
 {
     private readonly AppDbContext _db;
     private readonly EmailService _email;
-    private readonly IConfiguration _config;
 
-    public BookingService(AppDbContext db, EmailService email, IConfiguration config)
+    public BookingService(AppDbContext db, EmailService email)
     {
         _db = db;
         _email = email;
-        _config = config;
-    }
-
-    // ✅ Helper method to calculate slot price
-    private static decimal CalculateSlotPrice(Court court, TimeOnly startTime, TimeOnly endTime, DateTime date)
-    {
-        // Check if it's peak hours (5 PM - 9 PM)
-        var isPeak = startTime >= new TimeOnly(17, 0) && endTime <= new TimeOnly(21, 0);
-
-        // Check if it's weekend (Saturday or Sunday)
-        var isWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
-
-        var basePrice = isPeak ? court.PeakPricePerHour : court.PricePerHour;
-        if (isWeekend) basePrice *= 1.2m; // 20% weekend surcharge
-
-        var hours = (decimal)(endTime - startTime).TotalHours;
-        return Math.Round(basePrice * hours, 2);
     }
 
     public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
     {
-        var bookingDate = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc);
+        // Parse court ID from string to Guid
+        if (!Guid.TryParse(request.CourtId, out var courtGuid))
+            throw new InvalidOperationException("Invalid court ID format");
 
-        // ✅ Validate court exists and belongs to client
+        // Validate court exists
         var court = await _db.Courts
-            .FirstOrDefaultAsync(c => c.Id == Guid.Parse(request.CourtId) && c.ClientId == clientId)
+            .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
 
-        // ✅ Check availability for this specific court
-        if (!request.AdminOverride)
+        // Parse date
+        if (!DateTime.TryParse(request.Date, out var bookingDate))
+            throw new InvalidOperationException("Invalid date format");
+
+        // Validate time slots
+        if (request.Slots == null || !request.Slots.Any())
+            throw new InvalidOperationException("At least one time slot is required");
+
+        // Check for conflicts
+        foreach (var slot in request.Slots)
         {
-            var requestedStartTimes = request.Slots.Select(s => TimeOnly.Parse(s.StartTime)).ToHashSet();
-            var conflictingBookings = await _db.Bookings
-                .Where(b => b.Date.Date == bookingDate.Date
-                    && b.CourtId == court.Id
-                    && b.ClientId == clientId
+            if (!TimeOnly.TryParse(slot.StartTime, out var startTime))
+                throw new InvalidOperationException($"Invalid start time: {slot.StartTime}");
+            if (!TimeOnly.TryParse(slot.EndTime, out var endTime))
+                throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
+
+            var conflicting = await _db.Bookings
+                .Where(b => b.CourtId == courtGuid
+                    && b.Date == bookingDate
                     && b.Status != "cancelled"
                     && b.Status != "expired")
-                .Include(b => b.Slots)
-                .ToListAsync();
-
-            var bookedTimes = conflictingBookings
                 .SelectMany(b => b.Slots)
-                .Select(s => s.StartTime)
-                .ToHashSet();
+                .Where(s => s.Date == bookingDate
+                    && s.StartTime < endTime
+                    && s.EndTime > startTime)
+                .AnyAsync();
 
-            if (requestedStartTimes.Any(t => bookedTimes.Contains(t)))
-                throw new InvalidOperationException("One or more selected time slots are no longer available.");
+            if (conflicting)
+                throw new InvalidOperationException($"Time slot {slot.StartTime}-{slot.EndTime} is already booked");
         }
 
-        var referenceCode = $"PJ-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
-        var bookingStatus = request.Status ?? "pending_payment";
+        // Check blocked dates
+        var firstSlot = request.Slots.First();
+        if (!TimeOnly.TryParse(firstSlot.StartTime, out var firstStartTime))
+            throw new InvalidOperationException($"Invalid start time: {firstSlot.StartTime}");
+        if (!TimeOnly.TryParse(firstSlot.EndTime, out var firstEndTime))
+            throw new InvalidOperationException($"Invalid end time: {firstSlot.EndTime}");
+
+        var isBlocked = await _db.BlockedDates
+            .AnyAsync(bd => bd.CourtId == courtGuid
+                && bd.Date == bookingDate
+                && (bd.StartTime == null || bd.StartTime <= firstStartTime)
+                && (bd.EndTime == null || bd.EndTime >= firstEndTime));
+
+        if (isBlocked)
+            throw new InvalidOperationException("This time slot is blocked");
+
+        // Generate reference code
+        var referenceCode = $"BK-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
 
         var booking = new Booking
         {
-            CourtId = court.Id,
             ClientId = clientId,
+            CourtId = courtGuid,
             CustomerName = request.CustomerName,
             CustomerEmail = request.CustomerEmail,
             CustomerPhone = request.CustomerPhone,
             ReferenceCode = referenceCode,
             Date = bookingDate,
             TotalAmount = request.TotalAmount,
-            Status = bookingStatus,
-            PaymentMethod = bookingStatus == "confirmed" ? "cash" : "gcash",
+            Status = "pending_payment",
+            PaymentMethod = "gcash",
             Notes = request.Notes,
             CreatedAt = DateTime.UtcNow,
-            // ✅ Store price per slot
+            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
             Slots = request.Slots.Select(s => new TimeSlot
             {
-                CourtId = court.Id,
+                CourtId = courtGuid,
                 Date = bookingDate,
                 StartTime = TimeOnly.Parse(s.StartTime),
                 EndTime = TimeOnly.Parse(s.EndTime),
-                Price = CalculateSlotPrice(court, TimeOnly.Parse(s.StartTime), TimeOnly.Parse(s.EndTime), bookingDate)
+                Price = request.TotalAmount / request.Slots.Count // Distribute total evenly
             }).ToList()
         };
 
         _db.Bookings.Add(booking);
         await _db.SaveChangesAsync();
 
-        return MapToDto(booking);
+        try
+        {
+            await _email.NotifyAdminNewBookingAsync(
+                booking.CustomerName,
+                booking.ReferenceCode,
+                booking.Date.ToString("yyyy-MM-dd"),
+                $"{string.Join(", ", booking.Slots.Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"))}",
+                $"₱{booking.TotalAmount}"
+            );
+        }
+        catch { }
+
+        return MapToDto(booking, court.Name);
     }
 
-    public async Task<BookingDto?> TrackBookingAsync(string referenceCode, string email, Guid clientId)
+    public async Task<BookingDto> GetBookingAsync(Guid id, Guid clientId)
     {
-        var query = _db.Bookings.Where(b => b.ClientId == clientId);
-
-        if (!string.IsNullOrEmpty(referenceCode) && referenceCode != "ANY")
-            query = query.Where(b => b.ReferenceCode == referenceCode);
-
-        if (!string.IsNullOrEmpty(email) && email != "ANY")
-            query = query.Where(b => b.CustomerEmail == email);
-
-        return await query
+        var booking = await _db.Bookings
             .Include(b => b.Slots)
             .Include(b => b.Court)
-            .Select(b => MapToDto(b))
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        return MapToDto(booking, booking.Court?.Name ?? "");
     }
 
-    public async Task<List<BookingDto>> GetAllBookingsAsync(Guid clientId) =>
-        await _db.Bookings
-            .Where(b => b.ClientId == clientId)
+    public async Task<BookingDto> GetBookingByReferenceAsync(string referenceCode, Guid clientId)
+    {
+        var booking = await _db.Bookings
             .Include(b => b.Slots)
             .Include(b => b.Court)
-            .OrderByDescending(b => b.Date)
-            .Select(b => MapToDto(b))
+            .FirstOrDefaultAsync(b => b.ReferenceCode == referenceCode && b.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        return MapToDto(booking, booking.Court?.Name ?? "");
+    }
+
+    public async Task<BookingDto> TrackBookingAsync(string referenceCode, string? email, Guid clientId)
+    {
+        var query = _db.Bookings
+            .Include(b => b.Slots)
+            .Include(b => b.Court)
+            .Where(b => b.ReferenceCode == referenceCode && b.ClientId == clientId);
+
+        if (!string.IsNullOrEmpty(email))
+        {
+            query = query.Where(b => b.CustomerEmail == email);
+        }
+
+        var booking = await query.FirstOrDefaultAsync()
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        return MapToDto(booking, booking.Court?.Name ?? "");
+    }
+
+    public async Task<List<BookingDto>> GetBookingsAsync(Guid clientId, DateTime? fromDate = null, DateTime? toDate = null)
+    {
+        var query = _db.Bookings
+            .Include(b => b.Slots)
+            .Include(b => b.Court)
+            .Where(b => b.ClientId == clientId);
+
+        if (fromDate.HasValue)
+            query = query.Where(b => b.Date >= fromDate.Value);
+        if (toDate.HasValue)
+            query = query.Where(b => b.Date <= toDate.Value);
+
+        var bookings = await query
+            .OrderByDescending(b => b.CreatedAt)
             .ToListAsync();
+
+        return bookings.Select(b => MapToDto(b, b.Court?.Name ?? "")).ToList();
+    }
+
+    public async Task<List<BookingDto>> GetAllBookingsAsync(Guid clientId)
+    {
+        var bookings = await _db.Bookings
+            .Include(b => b.Slots)
+            .Include(b => b.Court)
+            .Where(b => b.ClientId == clientId)
+            .OrderByDescending(b => b.CreatedAt)
+            .ToListAsync();
+
+        return bookings.Select(b => MapToDto(b, b.Court?.Name ?? "")).ToList();
+    }
+
+    public async Task<BookingDto> UpdateBookingStatusAsync(Guid id, string status, Guid clientId)
+    {
+        var booking = await _db.Bookings
+            .Include(b => b.Slots)
+            .Include(b => b.Court)
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        booking.Status = status;
+        await _db.SaveChangesAsync();
+
+        return MapToDto(booking, booking.Court?.Name ?? "");
+    }
 
     public async Task<BookingDto> AdminUpdateBookingAsync(Guid id, AdminUpdateBookingRequest request, Guid clientId)
     {
@@ -137,33 +217,10 @@ public class BookingService : IBookingService
         booking.Status = request.Status;
         await _db.SaveChangesAsync();
 
-        // Send email to customer when confirmed
-        if (request.Status == "confirmed" && !string.IsNullOrEmpty(booking.CustomerEmail))
-        {
-            var timeDisplay = booking.Slots.Any()
-                ? $"{booking.Slots.OrderBy(s => s.StartTime).First().StartTime}–{booking.Slots.OrderBy(s => s.StartTime).Last().EndTime}"
-                : "";
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _email.NotifyCustomerBookingConfirmedAsync(
-                        booking.CustomerEmail,
-                        booking.CustomerName,
-                        booking.ReferenceCode,
-                        booking.Date.ToString("yyyy-MM-dd"),
-                        timeDisplay
-                    );
-                }
-                catch { }
-            });
-        }
-
-        return MapToDto(booking);
+        return MapToDto(booking, booking.Court?.Name ?? "");
     }
 
-    // Services/BookingService.cs
-    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotUrl, string paymentReference, Guid clientId)
+    public async Task<BookingDto> UploadPaymentAsync(Guid id, string screenshotBase64, string? paymentReference, Guid clientId)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
@@ -171,84 +228,117 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Booking not found");
 
-        booking.PaymentScreenshot = screenshotUrl;
-        booking.PaymentReference = paymentReference; // ✅ Store payment reference
+        if (booking.Status != "pending_payment")
+            throw new InvalidOperationException("Booking is not pending payment");
+
+        booking.PaymentScreenshot = screenshotBase64;
+        booking.PaymentReference = paymentReference;
         booking.Status = "payment_submitted";
         await _db.SaveChangesAsync();
 
-        // Notify admin
-        try
-        {
-            await _email.NotifyAdminNewBookingAsync(
-                booking.CustomerName,
-                booking.ReferenceCode + " [PAYMENT]",
-                booking.Date.ToString("yyyy-MM-dd"),
-                "Screenshot uploaded",
-                $"₱{booking.TotalAmount}"
-            );
-        }
-        catch { }
+        return MapToDto(booking, booking.Court?.Name ?? "");
+    }
 
-        return MapToDto(booking);
+    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotBase64, string? paymentReference, Guid clientId)
+    {
+        var booking = await _db.Bookings
+            .Include(b => b.Slots)
+            .Include(b => b.Court)
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        if (booking.Status != "pending_payment")
+            throw new InvalidOperationException("Booking is not pending payment");
+
+        booking.PaymentScreenshot = screenshotBase64;
+        booking.PaymentReference = paymentReference;
+        booking.Status = "payment_submitted";
+        await _db.SaveChangesAsync();
+
+        return MapToDto(booking, booking.Court?.Name ?? "");
+    }
+
+    public async Task ConfirmPaymentAsync(Guid id, Guid clientId)
+    {
+        var booking = await _db.Bookings
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        booking.Status = "confirmed";
+        await _db.SaveChangesAsync();
+    }
+
+    public async Task CancelBookingAsync(Guid id, Guid clientId)
+    {
+        var booking = await _db.Bookings
+            .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Booking not found");
+
+        booking.Status = "cancelled";
+        await _db.SaveChangesAsync();
     }
 
     public async Task AutoCompletePastBookingsAsync(Guid clientId)
     {
-        var now = DateTime.UtcNow;
-        var pastConfirmed = await _db.Bookings
-            .Where(b => b.Status == "confirmed" && b.ClientId == clientId)
-            .Include(b => b.Slots)
+        var pastBookings = await _db.Bookings
+            .Where(b => b.ClientId == clientId
+                && b.Date < DateTime.UtcNow.Date
+                && b.Status != "completed"
+                && b.Status != "cancelled")
             .ToListAsync();
 
-        foreach (var booking in pastConfirmed)
+        foreach (var booking in pastBookings)
         {
-            var lastSlot = booking.Slots.OrderByDescending(s => s.EndTime).FirstOrDefault();
-            if (lastSlot == null) continue;
-            var bookingEnd = booking.Date.Date.Add(lastSlot.EndTime.ToTimeSpan());
-            if (bookingEnd < now) booking.Status = "completed";
+            booking.Status = "completed";
         }
+
         await _db.SaveChangesAsync();
     }
 
     public async Task CancelExpiredPaymentsAsync(Guid clientId)
     {
-        var now = DateTime.UtcNow;
-        var expired = await _db.Bookings
-            .Where(b => b.Status == "pending_payment" && b.PaymentExpiresAt < now && b.ClientId == clientId)
+        var expiredBookings = await _db.Bookings
+            .Where(b => b.ClientId == clientId
+                && b.Status == "pending_payment"
+                && b.PaymentExpiresAt != null
+                && b.PaymentExpiresAt < DateTime.UtcNow)
             .ToListAsync();
 
-        foreach (var booking in expired)
+        foreach (var booking in expiredBookings)
         {
             booking.Status = "expired";
         }
+
         await _db.SaveChangesAsync();
     }
 
-    // Services/BookingService.cs - MapToDto
-    private static BookingDto MapToDto(Booking b) => new(
-        b.Id.ToString(),
-        b.CourtId.ToString(),
-        b.Court?.Name ?? "",
-        b.CustomerName,
-        b.CustomerEmail,
-        b.CustomerPhone,
-        b.ReferenceCode,
-        b.Date.ToString("yyyy-MM-dd"),
-        b.Slots.Select(s => new TimeSlotDto(
-            s.Id.ToString(),
-            s.Date.ToString("yyyy-MM-dd"),
-            s.StartTime.ToString("HH:mm"),
-            s.EndTime.ToString("HH:mm"),
-            false,
-            s.Price
-        )).ToList(),
-        b.TotalAmount,
-        b.Status,
-        b.PaymentMethod,
-        b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-        b.Notes,
-        b.PaymentScreenshot,
-        b.PaymentExpiresAt,
-        b.PaymentReference // ✅ Include payment reference
-    );
+    private static BookingDto MapToDto(Booking b, string courtName)
+    {
+        return new BookingDto(
+            b.Id.ToString(),
+            b.CourtId.ToString(),
+            courtName,
+            b.CustomerName,
+            b.CustomerEmail,
+            b.CustomerPhone,
+            b.ReferenceCode,
+            b.Date.ToString("yyyy-MM-dd"),
+            b.Slots.Select(s => new TimeSlotDto(
+                s.Id.ToString(),
+                s.Date.ToString("yyyy-MM-dd"),
+                s.StartTime.ToString("HH:mm"),
+                s.EndTime.ToString("HH:mm"),
+                false, // IsAvailable - always false for booked slots
+                s.Price
+            )).ToList(),
+            b.TotalAmount,
+            b.Status,
+            b.PaymentMethod,
+            b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            b.Notes,
+            b.PaymentScreenshot,
+            b.PaymentExpiresAt,
+            b.PaymentReference
+        );
+    }
 }

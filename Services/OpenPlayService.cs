@@ -86,7 +86,7 @@ public class OpenPlayService : IOpenPlayService
                     StartTime = session.StartTime,
                     EndTime = session.EndTime,
                     Price = session.PricePerPlayer,
-                    IsPeak = false
+                    
                 }
             }
         };
@@ -302,7 +302,7 @@ public class OpenPlayService : IOpenPlayService
                 s.Date.ToString("yyyy-MM-dd"),
                 s.StartTime.ToString("HH:mm"),
                 s.EndTime.ToString("HH:mm"),
-                s.IsPeak,
+                false,
                 s.Price
             )).ToList(),
             b.TotalAmount,
