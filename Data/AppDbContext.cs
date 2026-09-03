@@ -51,7 +51,6 @@ public class AppDbContext : DbContext
             e.Property(c => c.AccentColor).HasColumnName("accent_color");
             e.Property(c => c.GcashNumber).HasColumnName("gcash_number");
             e.Property(c => c.GcashAccountName).HasColumnName("gcash_account_name");
-            // ✅ Fixed: Only one definition with jsonb type
             e.Property(c => c.PaymentMethods)
                 .HasColumnName("payment_methods")
                 .HasColumnType("jsonb");
@@ -122,7 +121,7 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             // ✅ NEW - Open Play link
-            e.Property(b => b.OpenPlaySessionId).HasColumnName("open_play_session_id");
+            e.Property(b => b.OpenPlaySessionId).HasColumnName("OpenPlaySessionId");
             e.HasOne(b => b.OpenPlaySession)
                 .WithMany(s => s.Bookings)
                 .HasForeignKey(b => b.OpenPlaySessionId)
@@ -180,21 +179,21 @@ public class AppDbContext : DbContext
         // ✅ NEW - OpenPlaySession configuration
         modelBuilder.Entity<OpenPlaySession>(e =>
         {
-            e.Property(s => s.ClientId).HasColumnName("client_id");
-            e.Property(s => s.CourtId).HasColumnName("court_id");
-            e.Property(s => s.Date).HasColumnName("date");
-            e.Property(s => s.StartTime).HasColumnName("start_time");
-            e.Property(s => s.EndTime).HasColumnName("end_time");
-            e.Property(s => s.MaxPlayers).HasColumnName("max_players");
-            e.Property(s => s.CurrentPlayers).HasColumnName("current_players");
+            e.Property(s => s.ClientId).HasColumnName("ClientId");
+            e.Property(s => s.CourtId).HasColumnName("CourtId");
+            e.Property(s => s.Date).HasColumnName("Date");
+            e.Property(s => s.StartTime).HasColumnName("StartTime");
+            e.Property(s => s.EndTime).HasColumnName("EndTime");
+            e.Property(s => s.MaxPlayers).HasColumnName("MaxPlayers");
+            e.Property(s => s.CurrentPlayers).HasColumnName("CurrentPlayers");
             e.Property(s => s.PricePerPlayer)
-                .HasColumnName("price_per_player")
+                .HasColumnName("PricePerPlayer")
                 .HasColumnType("decimal(10,2)");
-            e.Property(s => s.SkillLevel).HasColumnName("skill_level");
-            e.Property(s => s.HostName).HasColumnName("host_name");
-            e.Property(s => s.Description).HasColumnName("description");
-            e.Property(s => s.IsActive).HasColumnName("is_active");
-            e.Property(s => s.CreatedAt).HasColumnName("created_at");
+            e.Property(s => s.SkillLevel).HasColumnName("SkillLevel");
+            e.Property(s => s.HostName).HasColumnName("HostName");
+            e.Property(s => s.Description).HasColumnName("Description");
+            e.Property(s => s.IsActive).HasColumnName("IsActive");
+            e.Property(s => s.CreatedAt).HasColumnName("CreatedAt");
 
             e.HasOne(s => s.Client)
                 .WithMany()
