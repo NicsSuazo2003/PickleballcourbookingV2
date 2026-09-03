@@ -19,6 +19,7 @@ public class Booking
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? PaymentExpiresAt { get; set; }
     public string? PaymentScreenshot { get; set; }
+    public string? PaymentReference { get; set; }
     public string? Notes { get; set; }
     public Guid ClientId { get; set; }
     public Client Client { get; set; } = null!;

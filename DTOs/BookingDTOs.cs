@@ -31,7 +31,8 @@ public record BookingDto(
     string CreatedAt,
     string? Notes,
     string? PaymentScreenshot,
-    DateTime? PaymentExpiresAt
+    DateTime? PaymentExpiresAt,
+    string? PaymentReference = null
 );
 
 public record TimeSlotDto(

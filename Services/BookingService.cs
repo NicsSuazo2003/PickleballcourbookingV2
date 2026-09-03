@@ -162,7 +162,8 @@ public class BookingService : IBookingService
         return MapToDto(booking);
     }
 
-    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotUrl, Guid clientId)
+    // Services/BookingService.cs
+    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotUrl, string paymentReference, Guid clientId)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
@@ -171,6 +172,7 @@ public class BookingService : IBookingService
             ?? throw new KeyNotFoundException("Booking not found");
 
         booking.PaymentScreenshot = screenshotUrl;
+        booking.PaymentReference = paymentReference; // ✅ Store payment reference
         booking.Status = "payment_submitted";
         await _db.SaveChangesAsync();
 
@@ -222,7 +224,7 @@ public class BookingService : IBookingService
         await _db.SaveChangesAsync();
     }
 
-    // ✅ Updated MapToDto with Price
+    // Services/BookingService.cs - MapToDto
     private static BookingDto MapToDto(Booking b) => new(
         b.Id.ToString(),
         b.CourtId.ToString(),
@@ -238,7 +240,7 @@ public class BookingService : IBookingService
             s.StartTime.ToString("HH:mm"),
             s.EndTime.ToString("HH:mm"),
             false,
-            s.Price // ✅ Include the stored price
+            s.Price
         )).ToList(),
         b.TotalAmount,
         b.Status,
@@ -246,6 +248,7 @@ public class BookingService : IBookingService
         b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
         b.Notes,
         b.PaymentScreenshot,
-        b.PaymentExpiresAt
+        b.PaymentExpiresAt,
+        b.PaymentReference // ✅ Include payment reference
     );
 }

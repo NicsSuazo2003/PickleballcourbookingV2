@@ -61,8 +61,9 @@ public class BookingController : ControllerBase
         return Ok(booking);
     }
 
+    // Controllers/BookingController.cs
     [HttpPost("{id}/upload-payment")]
-    public async Task<ActionResult<BookingDto>> UploadPayment(Guid id, IFormFile screenshot)
+    public async Task<ActionResult<BookingDto>> UploadPayment(Guid id, [FromForm] string paymentReference, IFormFile screenshot)
     {
         if (screenshot == null || screenshot.Length == 0)
             return BadRequest(new { message = "No file provided" });
@@ -88,7 +89,7 @@ public class BookingController : ControllerBase
             return BadRequest(new { message = "Upload failed" });
 
         var screenshotUrl = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
-        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl, clientId);
+        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl, paymentReference, clientId);
         return Ok(booking);
     }
 
