@@ -206,6 +206,7 @@ public class OpenPlayService : IOpenPlayService
         await _db.SaveChangesAsync();
     }
 
+    // Services/OpenPlayService.cs - Update AdminGetPlayersAsync
     public async Task<List<OpenPlayPlayerDto>> AdminGetPlayersAsync(Guid id, Guid clientId)
     {
         var exists = await _db.OpenPlaySessions.AnyAsync(s => s.Id == id && s.ClientId == clientId);
@@ -224,11 +225,12 @@ public class OpenPlayService : IOpenPlayService
             b.ReferenceCode,
             b.Status,
             b.PaymentMethod,
-            b.Status is "confirmed" or "completed" ? b.TotalAmount : 0m,
+            b.TotalAmount,  // ✅ CHANGED: Always show TotalAmount
             b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
         )).ToList();
     }
 
+    // Services/OpenPlayService.cs - Update AdminGetSessionStatsAsync
     public async Task<OpenPlaySessionStatsDto> AdminGetSessionStatsAsync(Guid id, Guid clientId)
     {
         var session = await _db.OpenPlaySessions
@@ -242,12 +244,14 @@ public class OpenPlayService : IOpenPlayService
         var confirmed = bookings.Count(b => b.Status is "confirmed" or "completed");
         var pending = bookings.Count(b => b.Status is "pending_payment" or "payment_submitted");
         var revenue = bookings.Where(b => b.Status is "confirmed" or "completed").Sum(b => b.TotalAmount);
+        var pendingRevenue = bookings.Where(b => b.Status is "pending_payment" or "payment_submitted").Sum(b => b.TotalAmount);  // ✅ NEW
 
         return new OpenPlaySessionStatsDto(
             session.Id.ToString(),
             session.CurrentPlayers,
             session.MaxPlayers,
             revenue,
+            pendingRevenue,  // ✅ NEW
             confirmed,
             pending
         );

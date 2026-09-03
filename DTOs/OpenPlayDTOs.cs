@@ -57,6 +57,7 @@ public record OpenPlaySessionStatsDto(
     int TotalPlayers,
     int MaxPlayers,
     decimal TotalRevenue,
+    decimal PendingRevenue,
     int ConfirmedCount,
     int PendingCount
 );
