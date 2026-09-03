@@ -137,8 +137,10 @@ public class CourtService : ICourtService
             }
         }
 
-        var now = DateTime.UtcNow;
-        var isToday = date.Date == now.Date;
+        // ✅ Fix: Use Philippine time (UTC+8) for checking past slots
+        var phTime = DateTime.UtcNow.AddHours(8); // UTC+8 (Philippine Time)
+        var isToday = date.Date == phTime.Date;
+
         var slots = new List<TimeSlotAvailabilityDto>();
 
         for (int h = openHour; h < closeHour; h++)
@@ -146,7 +148,9 @@ public class CourtService : ICourtService
             var slotTime = new TimeOnly(h % 24, 0);
             var startTime = $"{h % 24:D2}:00";
             var endTime = $"{(h + 1) % 24:D2}:00";
-            var isPast = isToday && h <= now.Hour;
+
+            // ✅ Check if slot is in the past based on Philippine time
+            var isPast = isToday && (h < phTime.Hour || (h == phTime.Hour && 0 < phTime.Minute));
             var isBooked = bookedSet.Contains(startTime);
             var isBlocked = blockedSet.Contains(h);
 
