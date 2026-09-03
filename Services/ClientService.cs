@@ -27,7 +27,11 @@ public class ClientService : IClientService
             client.PrimaryColor,
             client.AccentColor,
             client.GcashNumber,
-            client.GcashAccountName
+            client.GcashAccountName,
+            // ✅ Parse and return PaymentMethods
+            !string.IsNullOrEmpty(client.PaymentMethods)
+                ? JsonSerializer.Deserialize<object>(client.PaymentMethods)
+                : null
         );
     }
 
@@ -65,7 +69,11 @@ public class ClientService : IClientService
             client.PrimaryColor,
             client.AccentColor,
             client.GcashNumber,
-            client.GcashAccountName
+            client.GcashAccountName,
+            // ✅ Return updated PaymentMethods
+            !string.IsNullOrEmpty(client.PaymentMethods)
+                ? JsonSerializer.Deserialize<object>(client.PaymentMethods)
+                : null
         );
     }
 }

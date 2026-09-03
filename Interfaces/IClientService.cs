@@ -9,6 +9,7 @@ public interface IClientService
     Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request); // ✅ NEW
 }
 
+// ✅ Add PaymentMethods to ClientDto
 public record ClientDto(
     string Id,
     string Name,
@@ -17,5 +18,6 @@ public record ClientDto(
     string PrimaryColor,
     string AccentColor,
     string? GcashNumber,
-    string? GcashAccountName
+    string? GcashAccountName,
+    object? PaymentMethods = null // ✅ ADD THIS
 );
