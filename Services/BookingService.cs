@@ -28,9 +28,12 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
 
-        // Parse date
+        // Parse date - ✅ FIX: Convert to UTC
         if (!DateTime.TryParse(request.Date, out var bookingDate))
             throw new InvalidOperationException("Invalid date format");
+
+        // ✅ Ensure date is UTC to avoid PostgreSQL timestamp issue
+        bookingDate = DateTime.SpecifyKind(bookingDate.Date, DateTimeKind.Utc);
 
         // Validate time slots
         if (request.Slots == null || !request.Slots.Any())
@@ -82,21 +85,21 @@ public class BookingService : IBookingService
         {
             ClientId = clientId,
             CourtId = courtGuid,
-            CustomerName = request.CustomerName,
-            CustomerEmail = request.CustomerEmail,
-            CustomerPhone = request.CustomerPhone,
+            CustomerName = request.CustomerName.Trim(),
+            CustomerEmail = request.CustomerEmail.Trim().ToLower(),
+            CustomerPhone = request.CustomerPhone?.Trim(),
             ReferenceCode = referenceCode,
-            Date = bookingDate,
+            Date = bookingDate, // ✅ Already UTC
             TotalAmount = request.TotalAmount,
             Status = "pending_payment",
             PaymentMethod = "gcash",
-            Notes = request.Notes,
+            Notes = request.Notes?.Trim(),
             CreatedAt = DateTime.UtcNow,
             PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
             Slots = request.Slots.Select(s => new TimeSlot
             {
                 CourtId = courtGuid,
-                Date = bookingDate,
+                Date = bookingDate, // ✅ UTC
                 StartTime = TimeOnly.Parse(s.StartTime),
                 EndTime = TimeOnly.Parse(s.EndTime),
                 Price = request.TotalAmount / request.Slots.Count // Distribute total evenly

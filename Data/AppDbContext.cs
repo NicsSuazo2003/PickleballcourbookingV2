@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PickleballBookingSystem.Entities;
 
 namespace PickleballBookingSystem.Data;
@@ -15,10 +16,13 @@ public class AppDbContext : DbContext
     public DbSet<BlockedDate> BlockedDates => Set<BlockedDate>();
     public DbSet<PriceRule> PriceRules => Set<PriceRule>();
     public DbSet<Client> Clients => Set<Client>();
-    public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>(); // ✅ NEW
+    public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // ✅ Configure DateTime to use UTC
+        ConfigureDateTimeUtc(modelBuilder);
+
         // ✅ Table names are genuinely all-lowercase in Supabase — keep this.
         foreach (var entity in modelBuilder.Model.GetEntityTypes())
         {
@@ -126,6 +130,10 @@ public class AppDbContext : DbContext
                 .WithMany(s => s.Bookings)
                 .HasForeignKey(b => b.OpenPlaySessionId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // ✅ Configure Date to be stored as UTC
+            e.Property(b => b.Date)
+                .HasConversion(new DateTimeToUtcConverter());
         });
 
         // ✅ TimeSlot configuration
@@ -140,6 +148,10 @@ public class AppDbContext : DbContext
                 .WithMany(c => c.TimeSlots)
                 .HasForeignKey(ts => ts.CourtId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // ✅ Configure Date to be stored as UTC
+            e.Property(ts => ts.Date)
+                .HasConversion(new DateTimeToUtcConverter());
         });
 
         // ✅ BlockedDate configuration
@@ -155,6 +167,10 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(bd => bd.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ Configure Date to be stored as UTC
+            e.Property(bd => bd.Date)
+                .HasConversion(new DateTimeToUtcConverter());
         });
 
         // ✅ PriceRule configuration
@@ -204,6 +220,36 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(s => s.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ Configure Date to be stored as UTC
+            e.Property(s => s.Date)
+                .HasConversion(new DateTimeToUtcConverter());
         });
+    }
+
+    // ✅ Helper method to configure all DateTime properties to use UTC
+    private void ConfigureDateTimeUtc(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime) || property.ClrType == typeof(DateTime?))
+                {
+                    property.SetDefaultValueSql("NOW() AT TIME ZONE 'UTC'");
+                }
+            }
+        }
+    }
+}
+
+// ✅ Custom converter to ensure DateTime is always UTC
+public class DateTimeToUtcConverter : ValueConverter<DateTime, DateTime>
+{
+    public DateTimeToUtcConverter()
+        : base(
+            v => v.Kind == DateTimeKind.Utc ? v : DateTime.SpecifyKind(v, DateTimeKind.Utc),
+            v => v.Kind == DateTimeKind.Utc ? v : DateTime.SpecifyKind(v, DateTimeKind.Utc))
+    {
     }
 }
