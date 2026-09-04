@@ -14,10 +14,17 @@ public class Client
     public string? GcashNumber { get; set; }
     public string? GcashAccountName { get; set; }
 
-    [Column(TypeName = "jsonb")] // ✅ Add this attribute
+    [Column(TypeName = "jsonb")]
     public string? PaymentMethods { get; set; }
 
-    public DateTime CreatedAt { get; set; }
+    // ✅ FIX: Ensure CreatedAt is always UTC
+    private DateTime _createdAt;
+    public DateTime CreatedAt
+    {
+        get => _createdAt;
+        set => _createdAt = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    }
+
     public string Status { get; set; } = "active";
 
     public ICollection<Court> Courts { get; set; } = new List<Court>();

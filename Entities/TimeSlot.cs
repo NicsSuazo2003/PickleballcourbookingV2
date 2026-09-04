@@ -9,7 +9,14 @@ public class TimeSlot
     public Guid? CourtId { get; set; }
     public Court? Court { get; set; }
 
-    public DateTime Date { get; set; }
+    // ✅ FIX: Ensure Date is always UTC
+    private DateTime _date;
+    public DateTime Date
+    {
+        get => _date;
+        set => _date = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    }
+
     public TimeOnly StartTime { get; set; }
     public TimeOnly EndTime { get; set; }
     public decimal Price { get; set; }

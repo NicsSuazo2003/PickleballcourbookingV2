@@ -10,7 +10,15 @@ public class User
     public string PasswordHash { get; set; } = string.Empty;
     public string Role { get; set; } = "staff";
     public string? Avatar { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // ✅ FIX: Ensure CreatedAt is always UTC
+    private DateTime _createdAt;
+    public DateTime CreatedAt
+    {
+        get => _createdAt;
+        set => _createdAt = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    }
+
     public int BookingsCount { get; set; }
     public string Status { get; set; } = "active";
 
