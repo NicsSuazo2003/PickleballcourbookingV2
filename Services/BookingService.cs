@@ -203,8 +203,11 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Booking not found");
 
+        var previousStatus = booking.Status;
         booking.Status = status;
         await _db.SaveChangesAsync();
+
+        await SendStatusChangeEmailAsync(booking, previousStatus);
 
         return MapToDto(booking, booking.Court?.Name ?? "");
     }
@@ -217,8 +220,11 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Booking not found");
 
+        var previousStatus = booking.Status;
         booking.Status = request.Status;
         await _db.SaveChangesAsync();
+
+        await SendStatusChangeEmailAsync(booking, previousStatus);
 
         return MapToDto(booking, booking.Court?.Name ?? "");
     }
@@ -264,11 +270,15 @@ public class BookingService : IBookingService
     public async Task ConfirmPaymentAsync(Guid id, Guid clientId)
     {
         var booking = await _db.Bookings
+            .Include(b => b.Slots)
             .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Booking not found");
 
+        var previousStatus = booking.Status;
         booking.Status = "confirmed";
         await _db.SaveChangesAsync();
+
+        await SendStatusChangeEmailAsync(booking, previousStatus);
     }
 
     public async Task CancelBookingAsync(Guid id, Guid clientId)
@@ -313,6 +323,59 @@ public class BookingService : IBookingService
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    private async Task SendStatusChangeEmailAsync(Booking booking, string previousStatus)
+    {
+        // Only fire when the status actually changed, so re-saving the same
+        // status (e.g. an admin re-submitting the same form) doesn't spam the customer.
+        if (previousStatus == booking.Status)
+            return;
+
+        var timeRange = string.Join(", ", booking.Slots
+            .OrderBy(s => s.StartTime)
+            .Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"));
+        var dateStr = booking.Date.ToString("yyyy-MM-dd");
+
+        try
+        {
+            if (booking.Status == "confirmed")
+            {
+                await _email.NotifyCustomerBookingConfirmedAsync(
+                    booking.CustomerEmail,
+                    booking.CustomerName,
+                    booking.ReferenceCode,
+                    dateStr,
+                    timeRange
+                );
+            }
+            else if (booking.Status == "rejected")
+            {
+                await _email.NotifyCustomerBookingRejectedAsync(
+                    booking.CustomerEmail,
+                    booking.CustomerName,
+                    booking.ReferenceCode,
+                    dateStr,
+                    timeRange
+                );
+            }
+            else if (booking.Status == "cancelled")
+            {
+                await _email.NotifyCustomerBookingCancelledAsync(
+                    booking.CustomerEmail,
+                    booking.CustomerName,
+                    booking.ReferenceCode,
+                    dateStr,
+                    timeRange
+                );
+            }
+            // "completed" and other statuses: no customer email needed
+        }
+        catch
+        {
+            // Never let an email failure fail the underlying status update.
+            // EmailService already logs the failure internally.
+        }
     }
 
     private static BookingDto MapToDto(Booking b, string courtName)

@@ -109,4 +109,101 @@ public class EmailService
             _logger.LogError(ex, "Customer email notification failed");
         }
     }
+    public async Task NotifyCustomerBookingRejectedAsync(string customerEmail, string customerName, string referenceCode, string date, string time, string? reason = null)
+    {
+        try
+        {
+            using var http = new HttpClient();
+            var apiKey = _config["Brevo:ApiKey"];
+            var senderEmail = _config["Brevo:SenderEmail"];
+            var senderName = _config["Brevo:SenderName"];
+
+            var reasonHtml = string.IsNullOrWhiteSpace(reason)
+                ? ""
+                : $"<p><strong>Reason:</strong> {reason}</p>";
+
+            var payload = new
+            {
+                sender = new { email = senderEmail, name = senderName },
+                to = new[] { new { email = customerEmail, name = customerName } },
+                subject = $"❌ Booking Not Approved: {referenceCode}",
+                htmlContent = $@"
+                    <h3>Booking Update</h3>
+                    <p>Hi {customerName},</p>
+                    <p>Unfortunately, your booking <strong>{referenceCode}</strong> could not be approved.</p>
+                    <p><strong>Date:</strong> {date}</p>
+                    <p><strong>Time:</strong> {time}</p>
+                    {reasonHtml}
+                    <p>If you believe this is a mistake, or would like to rebook, please get in touch or visit the tracking page.</p>
+                    <p><a href='https://sideoutplayground.vercel.app/track'>Track your booking</a></p>
+                "
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            request.Headers.Add("api-key", apiKey);
+
+            var response = await http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Brevo rejection email failed: {Status} {Body}", response.StatusCode, responseBody);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Rejection email notification failed");
+        }
+    }
+
+    public async Task NotifyCustomerBookingCancelledAsync(string customerEmail, string customerName, string referenceCode, string date, string time, string? reason = null)
+    {
+        try
+        {
+            using var http = new HttpClient();
+            var apiKey = _config["Brevo:ApiKey"];
+            var senderEmail = _config["Brevo:SenderEmail"];
+            var senderName = _config["Brevo:SenderName"];
+
+            var reasonHtml = string.IsNullOrWhiteSpace(reason)
+                ? ""
+                : $"<p><strong>Reason:</strong> {reason}</p>";
+
+            var payload = new
+            {
+                sender = new { email = senderEmail, name = senderName },
+                to = new[] { new { email = customerEmail, name = customerName } },
+                subject = $"⚠️ Booking Cancelled: {referenceCode}",
+                htmlContent = $@"
+                    <h3>Your Booking Has Been Cancelled</h3>
+                    <p>Hi {customerName},</p>
+                    <p>Your booking <strong>{referenceCode}</strong> has been cancelled.</p>
+                    <p><strong>Date:</strong> {date}</p>
+                    <p><strong>Time:</strong> {time}</p>
+                    {reasonHtml}
+                    <p>If you have any questions, or would like to make a new booking, please get in touch or visit the tracking page.</p>
+                    <p><a href='https://sideoutplayground.vercel.app/track'>Track your booking</a></p>
+                "
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            request.Headers.Add("api-key", apiKey);
+
+            var response = await http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Brevo cancellation email failed: {Status} {Body}", response.StatusCode, responseBody);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Cancellation email notification failed");
+        }
+    }
 }
