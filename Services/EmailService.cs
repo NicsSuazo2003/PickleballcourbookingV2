@@ -8,18 +8,20 @@ public class EmailService
     private readonly IConfiguration _config;
     private readonly ILogger<EmailService> _logger;
 
-    // 🎨 Design tokens — matched to Center Court brand
-    private const string OUTER_BG = "#0F1113";
-    private const string BODY_BG = "#1E2022";
-    private const string CARD_BG = "#25282B";
-    private const string ACCENT = "#5EEAD4";       // teal / seafoam
-    private const string ACCENT_TEXT = "#0F172A";  // dark text on teal
+    // 🎨 Design tokens — matched to Center Court landing page
+    private const string OUTER_BG = "#0A0F0D";         // deep forest (forest-950 feel)
+    private const string BODY_BG = "#141A17";          // slightly lighter forest
+    private const string CARD_BG = "#1B2320";          // forest-900-ish
+    private const string ACCENT = "#FCD34D";           // gold-400 (banner + primary CTA)
+    private const string ACCENT_TEXT = "#0F172A";      // dark text on gold
+    private const string ACCENT_SOFT = "#FEF3C7";      // gold-100 (highlighted text)
+    private const string CYAN_ACCENT = "#22D3EE";      // cyan-400 (Open Play — reserved)
     private const string TEXT_PRIMARY = "#FFFFFF";
     private const string TEXT_SECONDARY = "#D1D5DB";
     private const string TEXT_MUTED = "#9CA3AF";
-    private const string DIVIDER = "#374151";
-    private const string DANGER = "#F87171";
-    private const string WARNING = "#FBBF24";
+    private const string DIVIDER = "#2A3430";          // subtle forest divider
+    private const string DANGER = "#F87171";           // red-400
+    private const string WARNING = "#FBBF24";          // amber-400
 
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
@@ -68,7 +70,7 @@ public class EmailService
         return FormatTime(input);
     }
 
-    // Normalizes "Sep 12, 2026" or "2026-09-12" into a friendly long date if possible
+    // Normalizes "Sep 12, 2026" or "2026-09-12" into a friendly long date
     private static string FormatDate(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
@@ -102,7 +104,7 @@ public class EmailService
 
         <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0' style='max-width:560px;background-color:{BODY_BG};border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.5);'>
 
-          <!-- ░░ Teal banner header ░░ -->
+          <!-- ░░ Gold banner header ░░ -->
           <tr>
             <td style='background-color:{ACCENT};padding:26px 32px 22px;text-align:left;'>
               <div style='font-size:11px;font-weight:800;letter-spacing:2.5px;color:{ACCENT_TEXT};text-transform:uppercase;margin-bottom:6px;font-family:-apple-system,BlinkMacSystemFont,""Segoe UI"",Roboto,Helvetica,Arial,sans-serif;'>
@@ -156,7 +158,7 @@ public class EmailService
               </tr>";
     }
 
-    // 🎯 Teal CTA button
+    // 🎯 Gold CTA button (matches landing "Book a Court")
     private static string CtaButton(string url, string text)
     {
         return $@"
@@ -230,7 +232,7 @@ public class EmailService
         string referenceCode,
         string date,
         string time,
-        string? amount = null)   // ✅ Optional
+        string? amount = null)
     {
         try
         {
@@ -242,7 +244,6 @@ public class EmailService
             var prettyDate = FormatDate(date);
             var prettyTime = FormatTimeRange(time);
 
-            // ✅ Conditional amount row
             var amountRow = string.IsNullOrWhiteSpace(amount)
                 ? ""
                 : KvRow("Amount Paid", amount);
@@ -252,7 +253,7 @@ public class EmailService
                 Hi {customerName},
               </p>
               <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
-                Great news — your booking has been <strong style='color:{TEXT_PRIMARY};font-weight:700;'>confirmed</strong>. See you on the court!
+                Great news — your booking has been <strong style='color:{ACCENT};font-weight:700;'>confirmed</strong>. See you on the court!
               </p>
 
               {StatusChip("Paid", ACCENT)}
@@ -287,7 +288,7 @@ public class EmailService
         string date,
         string time,
         string? reason = null,
-        string? amount = null)   // ✅ Optional
+        string? amount = null)
     {
         try
         {
@@ -299,7 +300,6 @@ public class EmailService
             var prettyDate = FormatDate(date);
             var prettyTime = FormatTimeRange(time);
 
-            // ✅ Conditional amount row
             var amountRow = string.IsNullOrWhiteSpace(amount)
                 ? ""
                 : KvRow("Amount Paid", amount);
@@ -358,7 +358,7 @@ public class EmailService
         string date,
         string time,
         string? reason = null,
-        string? amount = null)   // ✅ Optional
+        string? amount = null)
     {
         try
         {
@@ -370,7 +370,6 @@ public class EmailService
             var prettyDate = FormatDate(date);
             var prettyTime = FormatTimeRange(time);
 
-            // ✅ Conditional amount row
             var amountRow = string.IsNullOrWhiteSpace(amount)
                 ? ""
                 : KvRow("Amount Paid", amount);
@@ -388,7 +387,7 @@ public class EmailService
                 Hi {customerName},
               </p>
               <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
-                Your booking has been <strong style='color:{TEXT_PRIMARY};font-weight:700;'>cancelled</strong>. If this was unexpected, please reach out and we'll help sort it out.
+                Your booking has been <strong style='color:{ACCENT};font-weight:700;'>cancelled</strong>. If this was unexpected, please reach out and we'll help sort it out.
               </p>
 
               {StatusChip("Cancelled", WARNING)}
