@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 
 namespace PickleballBookingSystem.Services;
 
@@ -7,59 +8,212 @@ public class EmailService
     private readonly IConfiguration _config;
     private readonly ILogger<EmailService> _logger;
 
+    // 🎨 Design tokens — matched to Center Court brand
+    private const string OUTER_BG = "#0F1113";
+    private const string BODY_BG = "#1E2022";
+    private const string CARD_BG = "#25282B";
+    private const string ACCENT = "#5EEAD4";       // teal / seafoam
+    private const string ACCENT_TEXT = "#0F172A";  // dark text on teal
+    private const string TEXT_PRIMARY = "#FFFFFF";
+    private const string TEXT_SECONDARY = "#D1D5DB";
+    private const string TEXT_MUTED = "#9CA3AF";
+    private const string DIVIDER = "#374151";
+    private const string DANGER = "#F87171";
+    private const string WARNING = "#FBBF24";
+
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
         _config = config;
         _logger = logger;
     }
 
+    // ═════════════════════════════════════════════════════════════
+    // ⏰ Time formatting — always output 12-hour AM/PM
+    // ═════════════════════════════════════════════════════════════
+    private static string FormatTime(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input;
+
+        input = input.Trim();
+
+        // Already has AM/PM? Leave it alone.
+        if (Regex.IsMatch(input, @"\b(AM|PM)\b", RegexOptions.IgnoreCase))
+            return input;
+
+        // Try to parse as HH:mm or H:mm
+        var match = Regex.Match(input, @"^(\d{1,2}):(\d{2})");
+        if (!match.Success) return input;
+
+        if (!int.TryParse(match.Groups[1].Value, out var hour)) return input;
+        var minute = match.Groups[2].Value;
+
+        var period = hour >= 12 ? "PM" : "AM";
+        var hour12 = hour % 12;
+        if (hour12 == 0) hour12 = 12;
+
+        return $"{hour12}:{minute} {period}";
+    }
+
+    // Handles "19:00-20:00", "19:00 - 20:00", or "7:00 PM - 8:00 PM"
+    private static string FormatTimeRange(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input;
+
+        var parts = Regex.Split(input.Trim(), @"\s*[-–—]\s*");
+        if (parts.Length == 2)
+        {
+            return $"{FormatTime(parts[0])} – {FormatTime(parts[1])}";
+        }
+
+        return FormatTime(input);
+    }
+
+    // Normalizes "Sep 12, 2026" or "2026-09-12" into a friendly long date if possible
+    private static string FormatDate(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input;
+
+        if (DateTime.TryParse(input, out var dt))
+        {
+            return dt.ToString("MMMM d, yyyy"); // e.g. "September 12, 2026"
+        }
+
+        return input;
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // 🎨 Shared layout
+    // ═════════════════════════════════════════════════════════════
+    private static string WrapLayout(string bannerTitle, string contentHtml)
+    {
+        return $@"
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta name='color-scheme' content='dark light'>
+<title>Center Court</title>
+</head>
+<body style='margin:0;padding:0;background-color:{OUTER_BG};font-family:-apple-system,BlinkMacSystemFont,""Segoe UI"",Roboto,Helvetica,Arial,sans-serif;'>
+  <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0' style='background-color:{OUTER_BG};padding:24px 12px;'>
+    <tr>
+      <td align='center'>
+
+        <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0' style='max-width:560px;background-color:{BODY_BG};border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.5);'>
+
+          <!-- ░░ Teal banner header ░░ -->
+          <tr>
+            <td style='background-color:{ACCENT};padding:26px 32px 22px;text-align:left;'>
+              <div style='font-size:11px;font-weight:800;letter-spacing:2.5px;color:{ACCENT_TEXT};text-transform:uppercase;margin-bottom:6px;font-family:-apple-system,BlinkMacSystemFont,""Segoe UI"",Roboto,Helvetica,Arial,sans-serif;'>
+                CENTER COURT
+              </div>
+              <div style='font-size:24px;font-weight:800;color:{ACCENT_TEXT};line-height:1.2;margin:0;letter-spacing:-0.3px;'>
+                {bannerTitle}
+              </div>
+            </td>
+          </tr>
+
+          <!-- ░░ Body content ░░ -->
+          <tr>
+            <td style='padding:32px;'>
+              {contentHtml}
+            </td>
+          </tr>
+
+          <!-- ░░ Footer ░░ -->
+          <tr>
+            <td style='padding:20px 32px 26px;border-top:1px solid {DIVIDER};'>
+              <div style='font-size:11px;color:{TEXT_MUTED};text-align:center;line-height:1.6;'>
+                Book Your Court. Play Your Game.<br>
+                Automated message — please do not reply directly.
+              </div>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>";
+    }
+
+    // 🧱 Key-value row
+    private static string KvRow(string label, string value, bool isLast = false)
+    {
+        var border = isLast ? "" : $"border-bottom:1px solid {DIVIDER};";
+        return $@"
+              <tr>
+                <td style='padding:14px 0;{border}'>
+                  <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>
+                    {label}
+                  </div>
+                  <div style='font-size:16px;font-weight:600;color:{TEXT_PRIMARY};line-height:1.35;'>
+                    {value}
+                  </div>
+                </td>
+              </tr>";
+    }
+
+    // 🎯 Teal CTA button
+    private static string CtaButton(string url, string text)
+    {
+        return $@"
+              <table role='presentation' cellpadding='0' cellspacing='0' border='0' style='margin-top:28px;'>
+                <tr>
+                  <td align='center' style='border-radius:10px;background-color:{ACCENT};'>
+                    <a href='{url}' target='_blank' style='display:inline-block;padding:13px 30px;font-size:14px;font-weight:700;color:{ACCENT_TEXT};text-decoration:none;border-radius:10px;'>
+                      {text}
+                    </a>
+                  </td>
+                </tr>
+              </table>";
+    }
+
+    // 🏷 Status chip
+    private static string StatusChip(string text, string color)
+    {
+        return $@"
+              <div style='display:inline-block;padding:6px 14px;border-radius:999px;background-color:{color}22;border:1px solid {color}55;margin-bottom:24px;'>
+                <span style='font-size:11px;font-weight:800;letter-spacing:1.5px;color:{color};text-transform:uppercase;'>— {text}</span>
+              </div>";
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // 1. ADMIN — New Booking
+    // ═════════════════════════════════════════════════════════════
     public async Task NotifyAdminNewBookingAsync(string customerName, string referenceCode, string date, string time, string amount)
     {
         try
         {
-            using var http = new HttpClient();
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
             var adminEmail = _config["Brevo:AdminEmail"];
             var frontendUrl = _config["App:FrontendUrl"];
 
-            _logger.LogInformation("Brevo config: ApiKey={Key}, Sender={Sender}, Admin={Admin}",
-                apiKey?[..10] + "...", senderEmail, adminEmail);
+            var prettyDate = FormatDate(date);
+            var prettyTime = FormatTimeRange(time);
 
-            var payload = new
-            {
-                sender = new { email = senderEmail, name = senderName },
-                to = new[] { new { email = adminEmail, name = "Admin" } },
-                subject = $"🔔 New Booking: {referenceCode} — {customerName}",
-                htmlContent = $@"
-                    <h3>New Booking Received</h3>
-                    <p><strong>Reference:</strong> {referenceCode}</p>
-                    <p><strong>Customer:</strong> {customerName}</p>
-                    <p><strong>Date:</strong> {date}</p>
-                    <p><strong>Time:</strong> {time}</p>
-                    <p><strong>Amount:</strong> {amount}</p>
-                    <p><a href='{frontendUrl}/admin/bookings'>View in Admin Panel</a></p>
-                "
-            };
+            var content = $@"
+              <p style='margin:0 0 22px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+                A new booking has come in. Review the details below and confirm once payment is verified.
+              </p>
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
-            {
-                Content = JsonContent.Create(payload)
-            };
-            request.Headers.Add("api-key", apiKey);
+              <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
+                {KvRow("Customer", customerName)}
+                {KvRow("Reference", referenceCode)}
+                {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
+                {KvRow("Amount", amount, isLast: true)}
+              </table>
 
-            var response = await http.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
+              {CtaButton($"{frontendUrl}/admin/bookings", "Review in Admin Panel")}
+            ";
 
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogError("Brevo failed: {Status} {Body}", response.StatusCode, responseBody);
-            }
-            else
-            {
-                _logger.LogInformation("Email sent successfully to {Admin}", adminEmail);
-            }
+            var html = WrapLayout("New Booking", content);
+            await SendAsync(apiKey, senderEmail, senderName, adminEmail, "Admin",
+                $"🔔 New Booking: {referenceCode} — {customerName}", html);
         }
         catch (Exception ex)
         {
@@ -67,44 +221,55 @@ public class EmailService
         }
     }
 
-    public async Task NotifyCustomerBookingConfirmedAsync(string customerEmail, string customerName, string referenceCode, string date, string time)
+    // ═════════════════════════════════════════════════════════════
+    // 2. CUSTOMER — Booking Confirmed
+    // ═════════════════════════════════════════════════════════════
+    public async Task NotifyCustomerBookingConfirmedAsync(
+        string customerEmail,
+        string customerName,
+        string referenceCode,
+        string date,
+        string time,
+        string? amount = null)   // ✅ Optional
     {
         try
         {
-            using var http = new HttpClient();
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
             var frontendUrl = _config["App:FrontendUrl"];
 
-            var payload = new
-            {
-                sender = new { email = senderEmail, name = senderName },
-                to = new[] { new { email = customerEmail, name = customerName } },
-                subject = $"✅ Booking Confirmed: {referenceCode}",
-                htmlContent = $@"
-                    <h3>Your Booking is Confirmed!</h3>
-                    <p>Hi {customerName},</p>
-                    <p>Your booking <strong>{referenceCode}</strong> has been confirmed.</p>
-                    <p><strong>Date:</strong> {date}</p>
-                    <p><strong>Time:</strong> {time}</p>
-                    <p>See you on the court! 🏓</p>
-                    <p><a href='{frontendUrl}/track'>Track your booking</a></p>
-                "
-            };
+            var prettyDate = FormatDate(date);
+            var prettyTime = FormatTimeRange(time);
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
-            {
-                Content = JsonContent.Create(payload)
-            };
-            request.Headers.Add("api-key", apiKey);
+            // ✅ Conditional amount row
+            var amountRow = string.IsNullOrWhiteSpace(amount)
+                ? ""
+                : KvRow("Amount Paid", amount);
 
-            var response = await http.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                var responseBody = await response.Content.ReadAsStringAsync();
-                _logger.LogError("Brevo customer email failed: {Status} {Body}", response.StatusCode, responseBody);
-            }
+            var content = $@"
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+                Hi {customerName},
+              </p>
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+                Great news — your booking has been <strong style='color:{TEXT_PRIMARY};font-weight:700;'>confirmed</strong>. See you on the court!
+              </p>
+
+              {StatusChip("Paid", ACCENT)}
+
+              <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
+                {KvRow("Reference", referenceCode)}
+                {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
+                {amountRow}
+                {KvRow("Status", "Confirmed", isLast: true)}
+              </table>
+
+              {CtaButton($"{frontendUrl}/track", "Track Your Booking")}
+            ";
+
+            var html = WrapLayout("Booking Confirmed", content);
+            await SendAsync(apiKey, senderEmail, senderName, customerEmail, customerName,
+                $"✅ Booking Confirmed: {referenceCode}", html);
         }
         catch (Exception ex)
         {
@@ -112,49 +277,70 @@ public class EmailService
         }
     }
 
-    public async Task NotifyCustomerBookingRejectedAsync(string customerEmail, string customerName, string referenceCode, string date, string time, string? reason = null)
+    // ═════════════════════════════════════════════════════════════
+    // 3. CUSTOMER — Booking Rejected
+    // ═════════════════════════════════════════════════════════════
+    public async Task NotifyCustomerBookingRejectedAsync(
+        string customerEmail,
+        string customerName,
+        string referenceCode,
+        string date,
+        string time,
+        string? reason = null,
+        string? amount = null)   // ✅ Optional
     {
         try
         {
-            using var http = new HttpClient();
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
             var frontendUrl = _config["App:FrontendUrl"];
 
-            var reasonHtml = string.IsNullOrWhiteSpace(reason)
+            var prettyDate = FormatDate(date);
+            var prettyTime = FormatTimeRange(time);
+
+            // ✅ Conditional amount row
+            var amountRow = string.IsNullOrWhiteSpace(amount)
                 ? ""
-                : $"<p><strong>Reason:</strong> {reason}</p>";
+                : KvRow("Amount Paid", amount);
 
-            var payload = new
-            {
-                sender = new { email = senderEmail, name = senderName },
-                to = new[] { new { email = customerEmail, name = customerName } },
-                subject = $"❌ Booking Not Approved: {referenceCode}",
-                htmlContent = $@"
-                    <h3>Booking Update</h3>
-                    <p>Hi {customerName},</p>
-                    <p>Unfortunately, your booking <strong>{referenceCode}</strong> could not be approved.</p>
-                    <p><strong>Date:</strong> {date}</p>
-                    <p><strong>Time:</strong> {time}</p>
-                    {reasonHtml}
-                    <p>If you believe this is a mistake, or would like to rebook, please get in touch or visit the tracking page.</p>
-                    <p><a href='{frontendUrl}/track'>Track your booking</a></p>
-                "
-            };
+            var reasonBlock = string.IsNullOrWhiteSpace(reason)
+                ? ""
+                : $@"
+              <div style='margin-top:20px;padding:14px 16px;border-left:3px solid {DANGER};background-color:{DANGER}15;border-radius:6px;'>
+                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
+                <div style='font-size:14px;color:{TEXT_PRIMARY};line-height:1.55;'>{reason}</div>
+              </div>";
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
-            {
-                Content = JsonContent.Create(payload)
-            };
-            request.Headers.Add("api-key", apiKey);
+            var content = $@"
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+                Hi {customerName},
+              </p>
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+                Unfortunately, your booking could not be approved at this time.
+              </p>
 
-            var response = await http.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                var responseBody = await response.Content.ReadAsStringAsync();
-                _logger.LogError("Brevo rejection email failed: {Status} {Body}", response.StatusCode, responseBody);
-            }
+              {StatusChip("Not Approved", DANGER)}
+
+              <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
+                {KvRow("Reference", referenceCode)}
+                {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
+                {amountRow}
+                {KvRow("Status", "Not Approved", isLast: true)}
+              </table>
+
+              {reasonBlock}
+
+              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
+                If you believe this is a mistake, or would like to rebook, please get in touch — we're happy to help.
+              </p>
+
+              {CtaButton($"{frontendUrl}/track", "Track Your Booking")}
+            ";
+
+            var html = WrapLayout("Booking Not Approved", content);
+            await SendAsync(apiKey, senderEmail, senderName, customerEmail, customerName,
+                $"❌ Booking Not Approved: {referenceCode}", html);
         }
         catch (Exception ex)
         {
@@ -162,53 +348,121 @@ public class EmailService
         }
     }
 
-    public async Task NotifyCustomerBookingCancelledAsync(string customerEmail, string customerName, string referenceCode, string date, string time, string? reason = null)
+    // ═════════════════════════════════════════════════════════════
+    // 4. CUSTOMER — Booking Cancelled
+    // ═════════════════════════════════════════════════════════════
+    public async Task NotifyCustomerBookingCancelledAsync(
+        string customerEmail,
+        string customerName,
+        string referenceCode,
+        string date,
+        string time,
+        string? reason = null,
+        string? amount = null)   // ✅ Optional
     {
         try
         {
-            using var http = new HttpClient();
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
             var frontendUrl = _config["App:FrontendUrl"];
 
-            var reasonHtml = string.IsNullOrWhiteSpace(reason)
+            var prettyDate = FormatDate(date);
+            var prettyTime = FormatTimeRange(time);
+
+            // ✅ Conditional amount row
+            var amountRow = string.IsNullOrWhiteSpace(amount)
                 ? ""
-                : $"<p><strong>Reason:</strong> {reason}</p>";
+                : KvRow("Amount Paid", amount);
 
-            var payload = new
-            {
-                sender = new { email = senderEmail, name = senderName },
-                to = new[] { new { email = customerEmail, name = customerName } },
-                subject = $"⚠️ Booking Cancelled: {referenceCode}",
-                htmlContent = $@"
-                    <h3>Your Booking Has Been Cancelled</h3>
-                    <p>Hi {customerName},</p>
-                    <p>Your booking <strong>{referenceCode}</strong> has been cancelled.</p>
-                    <p><strong>Date:</strong> {date}</p>
-                    <p><strong>Time:</strong> {time}</p>
-                    {reasonHtml}
-                    <p>If you have any questions, or would like to make a new booking, please get in touch or visit the tracking page.</p>
-                    <p><a href='{frontendUrl}/track'>Track your booking</a></p>
-                "
-            };
+            var reasonBlock = string.IsNullOrWhiteSpace(reason)
+                ? ""
+                : $@"
+              <div style='margin-top:20px;padding:14px 16px;border-left:3px solid {WARNING};background-color:{WARNING}15;border-radius:6px;'>
+                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
+                <div style='font-size:14px;color:{TEXT_PRIMARY};line-height:1.55;'>{reason}</div>
+              </div>";
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
-            {
-                Content = JsonContent.Create(payload)
-            };
-            request.Headers.Add("api-key", apiKey);
+            var content = $@"
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+                Hi {customerName},
+              </p>
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+                Your booking has been <strong style='color:{TEXT_PRIMARY};font-weight:700;'>cancelled</strong>. If this was unexpected, please reach out and we'll help sort it out.
+              </p>
 
-            var response = await http.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                var responseBody = await response.Content.ReadAsStringAsync();
-                _logger.LogError("Brevo cancellation email failed: {Status} {Body}", response.StatusCode, responseBody);
-            }
+              {StatusChip("Cancelled", WARNING)}
+
+              <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
+                {KvRow("Reference", referenceCode)}
+                {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
+                {amountRow}
+                {KvRow("Status", "Cancelled", isLast: true)}
+              </table>
+
+              {reasonBlock}
+
+              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
+                Want to play again? You can start a fresh booking anytime.
+              </p>
+
+              {CtaButton($"{frontendUrl}/track", "Track Your Booking")}
+            ";
+
+            var html = WrapLayout("Booking Cancelled", content);
+            await SendAsync(apiKey, senderEmail, senderName, customerEmail, customerName,
+                $"⚠️ Booking Cancelled: {referenceCode}", html);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Cancellation email notification failed");
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // 🔧 Shared sender
+    // ═════════════════════════════════════════════════════════════
+    private async Task SendAsync(
+        string? apiKey,
+        string? senderEmail,
+        string? senderName,
+        string? toEmail,
+        string toName,
+        string subject,
+        string html)
+    {
+        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(senderEmail) || string.IsNullOrEmpty(toEmail))
+        {
+            _logger.LogWarning("Brevo config incomplete — skipping email {Subject}", subject);
+            return;
+        }
+
+        using var http = new HttpClient();
+
+        var payload = new
+        {
+            sender = new { email = senderEmail, name = senderName ?? "Center Court" },
+            to = new[] { new { email = toEmail, name = toName } },
+            subject,
+            htmlContent = html
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Add("api-key", apiKey);
+
+        var response = await http.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Brevo failed: {Status} {Body}", response.StatusCode, body);
+        }
+        else
+        {
+            _logger.LogInformation("Email sent → {To} ({Subject})", toEmail, subject);
         }
     }
 }
