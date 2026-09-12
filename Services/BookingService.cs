@@ -248,7 +248,11 @@ public class BookingService : IBookingService
         return MapToDto(booking, booking.Court?.Name ?? "");
     }
 
-    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string screenshotBase64, string? paymentReference, Guid clientId)
+    // ✅ FIXED: screenshotUrl is now nullable — a payment can be submitted
+    // with just a reference number and no screenshot. We only overwrite
+    // PaymentScreenshot when an actual URL was passed in, so an existing
+    // screenshot from a retry never gets wiped out by a null on a later call.
+    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string? screenshotUrl, string? paymentReference, Guid clientId)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
@@ -259,7 +263,9 @@ public class BookingService : IBookingService
         if (booking.Status != "pending_payment")
             throw new InvalidOperationException("Booking is not pending payment");
 
-        booking.PaymentScreenshot = screenshotBase64;
+        if (!string.IsNullOrEmpty(screenshotUrl))
+            booking.PaymentScreenshot = screenshotUrl;
+
         booking.PaymentReference = paymentReference;
         booking.Status = "payment_submitted";
         await _db.SaveChangesAsync();
