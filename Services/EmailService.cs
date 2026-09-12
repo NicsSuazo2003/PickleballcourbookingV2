@@ -22,6 +22,7 @@ public class EmailService
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
             var adminEmail = _config["Brevo:AdminEmail"];
+            var frontendUrl = _config["App:FrontendUrl"];
 
             _logger.LogInformation("Brevo config: ApiKey={Key}, Sender={Sender}, Admin={Admin}",
                 apiKey?[..10] + "...", senderEmail, adminEmail);
@@ -38,7 +39,7 @@ public class EmailService
                     <p><strong>Date:</strong> {date}</p>
                     <p><strong>Time:</strong> {time}</p>
                     <p><strong>Amount:</strong> {amount}</p>
-                    <p><a href='https://sideoutplayground.vercel.app/admin/bookings'>View in Admin Panel</a></p>
+                    <p><a href='{frontendUrl}/admin/bookings'>View in Admin Panel</a></p>
                 "
             };
 
@@ -74,6 +75,7 @@ public class EmailService
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
+            var frontendUrl = _config["App:FrontendUrl"];
 
             var payload = new
             {
@@ -87,7 +89,7 @@ public class EmailService
                     <p><strong>Date:</strong> {date}</p>
                     <p><strong>Time:</strong> {time}</p>
                     <p>See you on the court! 🏓</p>
-                    <p><a href='https://sideoutplayground.vercel.app/track'>Track your booking</a></p>
+                    <p><a href='{frontendUrl}/track'>Track your booking</a></p>
                 "
             };
 
@@ -109,6 +111,7 @@ public class EmailService
             _logger.LogError(ex, "Customer email notification failed");
         }
     }
+
     public async Task NotifyCustomerBookingRejectedAsync(string customerEmail, string customerName, string referenceCode, string date, string time, string? reason = null)
     {
         try
@@ -117,6 +120,7 @@ public class EmailService
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
+            var frontendUrl = _config["App:FrontendUrl"];
 
             var reasonHtml = string.IsNullOrWhiteSpace(reason)
                 ? ""
@@ -135,7 +139,7 @@ public class EmailService
                     <p><strong>Time:</strong> {time}</p>
                     {reasonHtml}
                     <p>If you believe this is a mistake, or would like to rebook, please get in touch or visit the tracking page.</p>
-                    <p><a href='https://sideoutplayground.vercel.app/track'>Track your booking</a></p>
+                    <p><a href='{frontendUrl}/track'>Track your booking</a></p>
                 "
             };
 
@@ -166,6 +170,7 @@ public class EmailService
             var apiKey = _config["Brevo:ApiKey"];
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
+            var frontendUrl = _config["App:FrontendUrl"];
 
             var reasonHtml = string.IsNullOrWhiteSpace(reason)
                 ? ""
@@ -184,7 +189,7 @@ public class EmailService
                     <p><strong>Time:</strong> {time}</p>
                     {reasonHtml}
                     <p>If you have any questions, or would like to make a new booking, please get in touch or visit the tracking page.</p>
-                    <p><a href='https://sideoutplayground.vercel.app/track'>Track your booking</a></p>
+                    <p><a href='{frontendUrl}/track'>Track your booking</a></p>
                 "
             };
 
