@@ -48,16 +48,17 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
 
             var conflicting = await _db.Bookings
-                .Where(b => b.CourtId == courtGuid
-                    && b.Date == bookingDate
-                    && b.Status != "cancelled"
-                    && b.Status != "expired")
-                .SelectMany(b => b.Slots)
-                .Where(s => s.Date == bookingDate
-                    && s.StartTime < endTime
-                    && s.EndTime > startTime)
-                .AnyAsync();
-
+    .Where(b => b.CourtId == courtGuid
+        && b.Date == bookingDate
+        && b.Status != "cancelled"
+        && b.Status != "expired"
+        && b.Status != "rejected"      // ✅ NEW
+        && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
+    .SelectMany(b => b.Slots)
+    .Where(s => s.Date == bookingDate
+        && s.StartTime < endTime
+        && s.EndTime > startTime)
+    .AnyAsync();
             if (conflicting)
                 throw new InvalidOperationException($"Time slot {slot.StartTime}-{slot.EndTime} is already booked");
         }
@@ -303,7 +304,10 @@ public class BookingService : IBookingService
             .Where(b => b.ClientId == clientId
                 && b.Date < DateTime.UtcNow.Date
                 && b.Status != "completed"
-                && b.Status != "cancelled")
+                && b.Status != "cancelled"
+                && b.Status != "rejected"
+                && b.Status != "refunded"      // ✅ NEW — refunded stays refunded
+                && b.Status != "expired")       // ✅ NEW — expired stays expired
             .ToListAsync();
 
         foreach (var booking in pastBookings)
@@ -439,15 +443,17 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
 
             var conflicting = await _db.Bookings
-                .Where(b => b.CourtId == courtGuid
-                    && b.Date == bookingDate
-                    && b.Status != "cancelled"
-                    && b.Status != "expired")
-                .SelectMany(b => b.Slots)
-                .Where(s => s.Date == bookingDate
-                    && s.StartTime < endTime
-                    && s.EndTime > startTime)
-                .AnyAsync();
+    .Where(b => b.CourtId == courtGuid
+        && b.Date == bookingDate
+        && b.Status != "cancelled"
+        && b.Status != "expired"
+        && b.Status != "rejected"      // ✅ NEW
+        && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
+    .SelectMany(b => b.Slots)
+    .Where(s => s.Date == bookingDate
+        && s.StartTime < endTime
+        && s.EndTime > startTime)
+    .AnyAsync();
 
             if (conflicting)
                 throw new InvalidOperationException($"Time slot {slot.StartTime}-{slot.EndTime} is already booked");

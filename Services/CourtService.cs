@@ -105,10 +105,15 @@ public class CourtService : ICourtService
         if (closeHour == 0) closeHour = 24;
 
         var bookedTimes = await _db.TimeSlots
-            .Where(s => s.Date.Date == date.Date && s.Booking.CourtId == courtId)
-            .Join(_db.Bookings.Where(b => b.Status != "cancelled" && b.Status != "expired" && b.ClientId == clientId),
-                s => s.BookingId, b => b.Id, (s, b) => s.StartTime)
-            .ToListAsync();
+    .Where(s => s.Date.Date == date.Date && s.Booking.CourtId == courtId)
+    .Join(_db.Bookings.Where(b =>
+            b.Status != "cancelled"
+            && b.Status != "expired"
+            && b.Status != "rejected"      // ✅ NEW
+            && b.Status != "refunded"       // ✅ NEW — refunded frees the slot
+            && b.ClientId == clientId),
+        s => s.BookingId, b => b.Id, (s, b) => s.StartTime)
+    .ToListAsync();
 
         var blockedDates = await _db.BlockedDates
             .Where(b => b.Date.Date == date.Date && (b.CourtId == null || b.CourtId == courtId) && b.ClientId == clientId)
