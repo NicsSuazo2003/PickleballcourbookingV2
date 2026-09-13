@@ -419,6 +419,80 @@ public class EmailService
     }
 
     // ═════════════════════════════════════════════════════════════
+    // 5. CUSTOMER — Booking Refunded
+    // ═════════════════════════════════════════════════════════════
+    public async Task NotifyCustomerBookingRefundedAsync(
+        string customerEmail,
+        string customerName,
+        string referenceCode,
+        string date,
+        string time,
+        string? amount = null,
+        string? reason = null)
+    {
+        try
+        {
+            var apiKey = _config["Brevo:ApiKey"];
+            var senderEmail = _config["Brevo:SenderEmail"];
+            var senderName = _config["Brevo:SenderName"];
+            var frontendUrl = _config["App:FrontendUrl"];
+
+            var prettyDate = FormatDate(date);
+            var prettyTime = FormatTimeRange(time);
+
+            var amountRow = string.IsNullOrWhiteSpace(amount)
+                ? ""
+                : KvRow("Amount Refunded", amount);
+
+            var reasonBlock = string.IsNullOrWhiteSpace(reason)
+                ? ""
+                : $@"
+          <div style='margin-top:20px;padding:14px 16px;border-left:3px solid #A78BFA;background-color:#A78BFA15;border-radius:6px;'>
+            <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
+            <div style='font-size:14px;color:{TEXT_PRIMARY};line-height:1.55;'>{reason}</div>
+          </div>";
+
+            var content = $@"
+          <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+            Hi {customerName},
+          </p>
+          <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+            Your booking has been <strong style='color:#A78BFA;font-weight:700;'>refunded</strong>. The amount will be returned to your original payment method.
+          </p>
+
+          {StatusChip("Refunded", "#A78BFA")}
+
+          <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
+            {KvRow("Reference", referenceCode)}
+            {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
+            {amountRow}
+            {KvRow("Status", "Refunded", isLast: true)}
+          </table>
+
+          {reasonBlock}
+
+          <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
+            Refunds are typically processed within 3–5 business days, depending on your bank or e-wallet. If you haven't received it by then, please reach out and we'll check on it.
+          </p>
+
+          <p style='margin:16px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
+            We'd love to see you back on the court sometime soon!
+          </p>
+
+          {CtaButton($"{frontendUrl}/", "Book Again")}
+        ";
+
+            var html = WrapLayout("Booking Refunded", content);
+            await SendAsync(apiKey, senderEmail, senderName, customerEmail, customerName,
+                $"💜 Booking Refunded: {referenceCode}", html);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Refund email notification failed");
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
     // 🔧 Shared sender
     // ═════════════════════════════════════════════════════════════
     private async Task SendAsync(

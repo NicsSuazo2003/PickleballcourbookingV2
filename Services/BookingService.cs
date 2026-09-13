@@ -379,7 +379,20 @@ public class BookingService : IBookingService
                     timeRange
                 );
             }
-            // "completed" and other statuses: no customer email needed
+            // ✅ NEW: refund email — only when there's an actual amount to refund
+            else if (booking.Status == "refunded" && booking.TotalAmount > 0)
+            {
+                await _email.NotifyCustomerBookingRefundedAsync(
+                    booking.CustomerEmail,
+                    booking.CustomerName,
+                    booking.ReferenceCode,
+                    dateStr,
+                    timeRange,
+                    $"₱{booking.TotalAmount:N2}"
+                );
+            }
+            // "completed", "expired", "pending_payment", "payment_submitted"
+            // and zero-amount refunds: no customer email needed
         }
         catch
         {
