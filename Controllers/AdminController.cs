@@ -60,6 +60,14 @@ public class AdminController : ControllerBase
         var booking = await _booking.AdminUpdateBookingAsync(id, request, clientId);
         return Ok(booking);
     }
+    [HttpPost("bookings/manual")]
+    [Authorize(Roles = "admin,staff")]
+    public async Task<ActionResult<BookingDto>> CreateManualBooking(StaffCreateBookingRequest request)
+    {
+        var clientId = await GetClientId();
+        var booking = await _booking.CreateStaffBookingAsync(request, clientId);
+        return Ok(booking);
+    }
 
     // ========================================
     // ✅ ADMIN ONLY ACCESS

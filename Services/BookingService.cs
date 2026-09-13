@@ -413,4 +413,147 @@ public class BookingService : IBookingService
             b.PaymentReference
         );
     }
+    public async Task<BookingDto> CreateStaffBookingAsync(StaffCreateBookingRequest request, Guid clientId)
+    {
+        // ─── Validate court ───────────────────────────────────────
+        if (!Guid.TryParse(request.CourtId, out var courtGuid))
+            throw new InvalidOperationException("Invalid court ID format");
+
+        var court = await _db.Courts
+            .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
+            ?? throw new KeyNotFoundException("Court not found");
+
+        // ─── Validate date ────────────────────────────────────────
+        if (!DateTime.TryParse(request.Date, out var bookingDate))
+            throw new InvalidOperationException("Invalid date format");
+
+        if (request.Slots == null || !request.Slots.Any())
+            throw new InvalidOperationException("At least one time slot is required");
+
+        // ─── Validate slots + check conflicts ─────────────────────
+        foreach (var slot in request.Slots)
+        {
+            if (!TimeOnly.TryParse(slot.StartTime, out var startTime))
+                throw new InvalidOperationException($"Invalid start time: {slot.StartTime}");
+            if (!TimeOnly.TryParse(slot.EndTime, out var endTime))
+                throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
+
+            var conflicting = await _db.Bookings
+                .Where(b => b.CourtId == courtGuid
+                    && b.Date == bookingDate
+                    && b.Status != "cancelled"
+                    && b.Status != "expired")
+                .SelectMany(b => b.Slots)
+                .Where(s => s.Date == bookingDate
+                    && s.StartTime < endTime
+                    && s.EndTime > startTime)
+                .AnyAsync();
+
+            if (conflicting)
+                throw new InvalidOperationException($"Time slot {slot.StartTime}-{slot.EndTime} is already booked");
+        }
+
+        // ─── Determine status + payment method + expiry ───────────
+        var mode = (request.PaymentMode ?? "cash").ToLowerInvariant();
+        string status;
+        string paymentMethod;
+        DateTime? expiresAt;
+
+        switch (mode)
+        {
+            case "gcash":
+                status = "pending_payment";
+                paymentMethod = "gcash";
+                expiresAt = DateTime.UtcNow.AddMinutes(15);
+                break;
+
+            case "pay_later":
+                status = "pending_payment";
+                paymentMethod = "cash";
+                expiresAt = null; // never expires — payment on arrival
+                break;
+
+            case "free":
+            case "comp":
+                status = "confirmed";
+                paymentMethod = "comp";
+                expiresAt = null;
+                break;
+
+            case "cash":
+            default:
+                status = "confirmed";
+                paymentMethod = "cash";
+                expiresAt = null;
+                break;
+        }
+
+        // ─── Calculate total (default: hourly rate × hours) ───────
+        decimal totalAmount;
+        if (request.TotalAmount.HasValue && request.TotalAmount.Value >= 0)
+        {
+            totalAmount = request.TotalAmount.Value;
+        }
+        else
+        {
+            var totalMinutes = request.Slots.Sum(s =>
+            {
+                TimeOnly.TryParse(s.StartTime, out var st);
+                TimeOnly.TryParse(s.EndTime, out var en);
+                return (en - st).TotalMinutes;
+            });
+            var hours = (decimal)(totalMinutes / 60.0);
+            totalAmount = court.PricePerHour * hours;
+        }
+
+        // ─── Build booking ────────────────────────────────────────
+        var referenceCode = $"ST-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+
+        var booking = new Booking
+        {
+            ClientId = clientId,
+            CourtId = courtGuid,
+            CustomerName = request.CustomerName,
+            CustomerEmail = request.CustomerEmail ?? "",
+            CustomerPhone = request.CustomerPhone,
+            ReferenceCode = referenceCode,
+            Date = bookingDate,
+            TotalAmount = totalAmount,
+            Status = status,
+            PaymentMethod = paymentMethod,
+            Notes = request.Notes,
+            CreatedAt = DateTime.UtcNow,
+            PaymentExpiresAt = expiresAt,
+            Slots = request.Slots.Select(s => new TimeSlot
+            {
+                CourtId = courtGuid,
+                Date = bookingDate,
+                StartTime = TimeOnly.Parse(s.StartTime),
+                EndTime = TimeOnly.Parse(s.EndTime),
+                Price = totalAmount / request.Slots.Count
+            }).ToList()
+        };
+
+        _db.Bookings.Add(booking);
+        await _db.SaveChangesAsync();
+
+        // ─── Optional: send confirmation to customer ──────────────
+        if (request.SendConfirmation && !string.IsNullOrWhiteSpace(request.CustomerEmail))
+        {
+            try
+            {
+                await _email.NotifyCustomerBookingConfirmedAsync(
+                    booking.CustomerEmail,
+                    booking.CustomerName,
+                    booking.ReferenceCode,
+                    booking.Date.ToString("yyyy-MM-dd"),
+                    string.Join(", ", booking.Slots.Select(s => $"{s.StartTime:HH:mm} - {s.EndTime:HH:mm}")),
+                    $"₱{booking.TotalAmount:N2}"
+                );
+            }
+            catch { /* don't fail the whole request if email breaks */ }
+        }
+
+        return MapToDto(booking, court.Name);
+    }
 }
