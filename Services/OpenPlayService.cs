@@ -61,6 +61,9 @@ public class OpenPlayService : IOpenPlayService
 
         var referenceCode = $"OP-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
 
+        // ✅ FIX: Ensure Date is UTC
+        var utcDate = DateTime.SpecifyKind(session.Date, DateTimeKind.Utc);
+
         var booking = new Booking
         {
             CourtId = session.CourtId,
@@ -70,7 +73,7 @@ public class OpenPlayService : IOpenPlayService
             CustomerEmail = request.CustomerEmail,
             CustomerPhone = request.CustomerPhone,
             ReferenceCode = referenceCode,
-            Date = session.Date,
+            Date = utcDate, // ✅ Fixed - now UTC
             TotalAmount = session.PricePerPlayer,
             Status = "pending_payment",
             PaymentMethod = "gcash",
@@ -82,11 +85,10 @@ public class OpenPlayService : IOpenPlayService
                 new TimeSlot
                 {
                     CourtId = session.CourtId,
-                    Date = session.Date,
+                    Date = utcDate, // ✅ Fixed - now UTC
                     StartTime = session.StartTime,
                     EndTime = session.EndTime,
                     Price = session.PricePerPlayer,
-                    
                 }
             }
         };
@@ -109,6 +111,56 @@ public class OpenPlayService : IOpenPlayService
         catch { }
 
         return MapToBookingDto(booking, session.Court?.Name ?? "");
+    }
+
+    /// <summary>
+    /// Public-safe player roster for a session. Returns first-name + last-initial only,
+    /// plus status and join time. Never exposes email, phone, payment data, or reference codes.
+    /// </summary>
+    public async Task<List<PublicOpenPlayPlayerDto>> GetPublicPlayersAsync(Guid id, Guid clientId)
+    {
+        // Only return rosters for active, non-cancelled, non-past sessions.
+        // This blocks enumeration of historic sessions.
+        var session = await _db.OpenPlaySessions
+            .FirstOrDefaultAsync(s => s.Id == id && s.ClientId == clientId && s.IsActive)
+            ?? throw new KeyNotFoundException("Open Play session not found");
+
+        var now = DateTime.UtcNow;
+        var sessionEnd = session.Date.Date.Add(session.EndTime.ToTimeSpan());
+        if (sessionEnd < now)
+            throw new KeyNotFoundException("Open Play session has ended");
+
+        // Only include players who actually hold a spot. Skip cancelled/rejected/expired
+        // so the count matches what a visitor would see in the session summary.
+        var bookings = await _db.Bookings
+            .Where(b => b.OpenPlaySessionId == id
+                     && b.ClientId == clientId
+                     && b.Status != "cancelled"
+                     && b.Status != "rejected"
+                     && b.Status != "expired"
+                     && b.Status != "refunded")
+            .OrderBy(b => b.CreatedAt)
+            .Take(50) // hard cap — no session should exceed this, but prevents runaway payloads
+            .ToListAsync();
+
+        return bookings.Select(b => new PublicOpenPlayPlayerDto(
+            b.Id.ToString(),
+            ToDisplayName(b.CustomerName),
+            b.Status,
+            b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        )).ToList();
+    }
+
+    /// <summary>
+    /// "Juan Dela Cruz" → "Juan D." — privacy-safe display name.
+    /// Single-word names are shown as-is.
+    /// </summary>
+    private static string ToDisplayName(string fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName)) return "Player";
+        var parts = fullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1) return parts[0];
+        return $"{parts[0]} {char.ToUpperInvariant(parts[^1][0])}.";
     }
 
     public async Task<List<OpenPlaySessionDto>> AdminGetAllSessionsAsync(Guid clientId)
@@ -134,6 +186,7 @@ public class OpenPlayService : IOpenPlayService
             .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
 
+        // ✅ Already correct - using UTC
         var session = new OpenPlaySession
         {
             ClientId = clientId,
@@ -182,6 +235,7 @@ public class OpenPlayService : IOpenPlayService
             session.Court = court;
         }
 
+        // ✅ Already correct - using UTC
         session.Date = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc);
         session.StartTime = TimeOnly.Parse(request.StartTime);
         session.EndTime = TimeOnly.Parse(request.EndTime);
@@ -206,7 +260,6 @@ public class OpenPlayService : IOpenPlayService
         await _db.SaveChangesAsync();
     }
 
-    // Services/OpenPlayService.cs - Update AdminGetPlayersAsync
     public async Task<List<OpenPlayPlayerDto>> AdminGetPlayersAsync(Guid id, Guid clientId)
     {
         var exists = await _db.OpenPlaySessions.AnyAsync(s => s.Id == id && s.ClientId == clientId);
@@ -225,12 +278,11 @@ public class OpenPlayService : IOpenPlayService
             b.ReferenceCode,
             b.Status,
             b.PaymentMethod,
-            b.TotalAmount,  // ✅ CHANGED: Always show TotalAmount
+            b.TotalAmount,
             b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
         )).ToList();
     }
 
-    // Services/OpenPlayService.cs - Update AdminGetSessionStatsAsync
     public async Task<OpenPlaySessionStatsDto> AdminGetSessionStatsAsync(Guid id, Guid clientId)
     {
         var session = await _db.OpenPlaySessions
@@ -244,14 +296,14 @@ public class OpenPlayService : IOpenPlayService
         var confirmed = bookings.Count(b => b.Status is "confirmed" or "completed");
         var pending = bookings.Count(b => b.Status is "pending_payment" or "payment_submitted");
         var revenue = bookings.Where(b => b.Status is "confirmed" or "completed").Sum(b => b.TotalAmount);
-        var pendingRevenue = bookings.Where(b => b.Status is "pending_payment" or "payment_submitted").Sum(b => b.TotalAmount);  // ✅ NEW
+        var pendingRevenue = bookings.Where(b => b.Status is "pending_payment" or "payment_submitted").Sum(b => b.TotalAmount);
 
         return new OpenPlaySessionStatsDto(
             session.Id.ToString(),
             session.CurrentPlayers,
             session.MaxPlayers,
             revenue,
-            pendingRevenue,  // ✅ NEW
+            pendingRevenue,
             confirmed,
             pending
         );

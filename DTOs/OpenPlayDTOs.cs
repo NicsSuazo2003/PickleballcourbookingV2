@@ -73,3 +73,9 @@ public record OpenPlayPlayerDto(
     decimal AmountPaid,
     string JoinedAt
 );
+public record PublicOpenPlayPlayerDto(
+    string BookingId,
+    string DisplayName,
+    string Status,
+    string JoinedAt
+);

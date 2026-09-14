@@ -56,6 +56,27 @@ public class OpenPlayController : ControllerBase
         if (session == null) return NotFound(new { message = "Open Play session not found" });
         return Ok(session);
     }
+    /// <summary>
+    /// Public roster for an Open Play session. Returns first-name + last-initial only.
+    /// No authentication required — this is what the public session details modal uses.
+    /// </summary>
+    [HttpGet("open-play/{id}/players/public")]
+    public async Task<ActionResult<List<PublicOpenPlayPlayerDto>>> GetPublicPlayers(Guid id)
+    {
+        var clientId = await GetClientId();
+
+        try
+        {
+            var players = await _openPlay.GetPublicPlayersAsync(id, clientId);
+            return Ok(players);
+        }
+        catch (KeyNotFoundException)
+        {
+            // Return 404 for both "session not found" and "session ended" so we don't
+            // leak whether a session ever existed to anonymous callers.
+            return NotFound(new { message = "Open Play session not found" });
+        }
+    }
 
     [HttpPost("open-play/{id}/join")]
     public async Task<ActionResult<BookingDto>> Join(Guid id, JoinOpenPlayRequest request)
