@@ -8,20 +8,22 @@ public class EmailService
     private readonly IConfiguration _config;
     private readonly ILogger<EmailService> _logger;
 
-    // 🎨 Design tokens — matched to Center Court landing page
-    private const string OUTER_BG = "#0A0F0D";         // deep forest (forest-950 feel)
-    private const string BODY_BG = "#141A17";          // slightly lighter forest
-    private const string CARD_BG = "#1B2320";          // forest-900-ish
-    private const string ACCENT = "#FCD34D";           // gold-400 (banner + primary CTA)
+    // 🎨 Design tokens — matched to Center Court landing page (Forest Green theme)
+    private const string OUTER_BG = "#0A1408";         // deep forest (forest-950 feel)
+    private const string BODY_BG = "#14261A";          // mid forest (forest-900)
+    private const string CARD_BG = "#1B3524";          // forest-800
+    private const string BANNER_BG = "#1F3D2A";        // forest-750 — banner background
+    private const string ACCENT = "#FCD34D";           // gold-400 (primary CTA — kept)
     private const string ACCENT_TEXT = "#0F172A";      // dark text on gold
-    private const string ACCENT_SOFT = "#FEF3C7";      // gold-100 (highlighted text)
-    private const string CYAN_ACCENT = "#22D3EE";      // cyan-400 (Open Play — reserved)
-    private const string TEXT_PRIMARY = "#FFFFFF";
-    private const string TEXT_SECONDARY = "#D1D5DB";
-    private const string TEXT_MUTED = "#9CA3AF";
-    private const string DIVIDER = "#2A3430";          // subtle forest divider
+    private const string CYAN = "#22D3EE";             // cyan-400 (Open Play / "Paid" accent)
+    private const string CYAN_SOFT = "#A5F3FC";        // cyan-200
+    private const string TEXT_CREAM = "#F0EDE4";       // soft off-white — primary text
+    private const string TEXT_CREAM_MUTED = "#A9A69C"; // muted cream — labels
+    private const string TEXT_CREAM_SOFT = "#D9D4C7";  // slightly lighter cream for body
+    private const string DIVIDER = "#2F4A38";          // mid forest divider
     private const string DANGER = "#F87171";           // red-400
     private const string WARNING = "#FBBF24";          // amber-400
+    private const string PURPLE = "#A78BFA";           // purple-400 (refund)
 
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
@@ -38,11 +40,9 @@ public class EmailService
 
         input = input.Trim();
 
-        // Already has AM/PM? Leave it alone.
         if (Regex.IsMatch(input, @"\b(AM|PM)\b", RegexOptions.IgnoreCase))
             return input;
 
-        // Try to parse as HH:mm or H:mm
         var match = Regex.Match(input, @"^(\d{1,2}):(\d{2})");
         if (!match.Success) return input;
 
@@ -56,7 +56,6 @@ public class EmailService
         return $"{hour12}:{minute} {period}";
     }
 
-    // Handles "19:00-20:00", "19:00 - 20:00", or "7:00 PM - 8:00 PM"
     private static string FormatTimeRange(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
@@ -70,21 +69,20 @@ public class EmailService
         return FormatTime(input);
     }
 
-    // Normalizes "Sep 12, 2026" or "2026-09-12" into a friendly long date
     private static string FormatDate(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
 
         if (DateTime.TryParse(input, out var dt))
         {
-            return dt.ToString("MMMM d, yyyy"); // e.g. "September 12, 2026"
+            return dt.ToString("MMMM d, yyyy");
         }
 
         return input;
     }
 
     // ═════════════════════════════════════════════════════════════
-    // 🎨 Shared layout
+    // 🎨 Shared layout — Forest Green theme
     // ═════════════════════════════════════════════════════════════
     private static string WrapLayout(string bannerTitle, string contentHtml)
     {
@@ -104,13 +102,13 @@ public class EmailService
 
         <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0' style='max-width:560px;background-color:{BODY_BG};border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.5);'>
 
-          <!-- ░░ Gold banner header ░░ -->
+          <!-- ░░ Forest Green banner header ░░ -->
           <tr>
-            <td style='background-color:{ACCENT};padding:26px 32px 22px;text-align:left;'>
-              <div style='font-size:11px;font-weight:800;letter-spacing:2.5px;color:{ACCENT_TEXT};text-transform:uppercase;margin-bottom:6px;font-family:-apple-system,BlinkMacSystemFont,""Segoe UI"",Roboto,Helvetica,Arial,sans-serif;'>
+            <td style='background-color:{BANNER_BG};border-bottom:1px solid {DIVIDER};padding:26px 32px 22px;text-align:left;'>
+              <div style='font-size:11px;font-weight:800;letter-spacing:2.5px;color:{ACCENT};text-transform:uppercase;margin-bottom:6px;font-family:-apple-system,BlinkMacSystemFont,""Segoe UI"",Roboto,Helvetica,Arial,sans-serif;'>
                 CENTER COURT
               </div>
-              <div style='font-size:24px;font-weight:800;color:{ACCENT_TEXT};line-height:1.2;margin:0;letter-spacing:-0.3px;'>
+              <div style='font-size:24px;font-weight:800;color:{TEXT_CREAM};line-height:1.2;margin:0;letter-spacing:-0.3px;'>
                 {bannerTitle}
               </div>
             </td>
@@ -126,7 +124,7 @@ public class EmailService
           <!-- ░░ Footer ░░ -->
           <tr>
             <td style='padding:20px 32px 26px;border-top:1px solid {DIVIDER};'>
-              <div style='font-size:11px;color:{TEXT_MUTED};text-align:center;line-height:1.6;'>
+              <div style='font-size:11px;color:{TEXT_CREAM_MUTED};text-align:center;line-height:1.6;'>
                 Book Your Court. Play Your Game.<br>
                 Automated message — please do not reply directly.
               </div>
@@ -141,24 +139,24 @@ public class EmailService
 </html>";
     }
 
-    // 🧱 Key-value row
+    // 🧱 Key-value row — cream label + white value
     private static string KvRow(string label, string value, bool isLast = false)
     {
         var border = isLast ? "" : $"border-bottom:1px solid {DIVIDER};";
         return $@"
               <tr>
                 <td style='padding:14px 0;{border}'>
-                  <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>
+                  <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_CREAM_MUTED};text-transform:uppercase;margin-bottom:5px;'>
                     {label}
                   </div>
-                  <div style='font-size:16px;font-weight:600;color:{TEXT_PRIMARY};line-height:1.35;'>
+                  <div style='font-size:16px;font-weight:600;color:{TEXT_CREAM};line-height:1.35;'>
                     {value}
                   </div>
                 </td>
               </tr>";
     }
 
-    // 🎯 Gold CTA button (matches landing "Book a Court")
+    // 🎯 Gold CTA button — kept gold (primary action color)
     private static string CtaButton(string url, string text)
     {
         return $@"
@@ -173,7 +171,7 @@ public class EmailService
               </table>";
     }
 
-    // 🏷 Status chip
+    // 🏷 Status chip — forest-friendly with border + soft fill
     private static string StatusChip(string text, string color)
     {
         return $@"
@@ -199,7 +197,7 @@ public class EmailService
             var prettyTime = FormatTimeRange(time);
 
             var content = $@"
-              <p style='margin:0 0 22px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+              <p style='margin:0 0 22px;font-size:15px;line-height:1.65;color:{TEXT_CREAM_SOFT};'>
                 A new booking has come in. Review the details below and confirm once payment is verified.
               </p>
 
@@ -249,14 +247,14 @@ public class EmailService
                 : KvRow("Amount Paid", amount);
 
             var content = $@"
-              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_CREAM_SOFT};'>
                 Hi {customerName},
               </p>
-              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
-                Great news — your booking has been <strong style='color:{ACCENT};font-weight:700;'>confirmed</strong>. See you on the court!
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_CREAM_SOFT};'>
+                Great news — your booking has been <strong style='color:{CYAN};font-weight:700;'>confirmed</strong>. See you on the court!
               </p>
 
-              {StatusChip("Paid", ACCENT)}
+              {StatusChip("Paid", CYAN)}
 
               <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
                 {KvRow("Reference", referenceCode)}
@@ -308,15 +306,15 @@ public class EmailService
                 ? ""
                 : $@"
               <div style='margin-top:20px;padding:14px 16px;border-left:3px solid {DANGER};background-color:{DANGER}15;border-radius:6px;'>
-                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
-                <div style='font-size:14px;color:{TEXT_PRIMARY};line-height:1.55;'>{reason}</div>
+                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_CREAM_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
+                <div style='font-size:14px;color:{TEXT_CREAM};line-height:1.55;'>{reason}</div>
               </div>";
 
             var content = $@"
-              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_CREAM_SOFT};'>
                 Hi {customerName},
               </p>
-              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_CREAM_SOFT};'>
                 Unfortunately, your booking could not be approved at this time.
               </p>
 
@@ -331,7 +329,7 @@ public class EmailService
 
               {reasonBlock}
 
-              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
+              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_CREAM_MUTED};'>
                 If you believe this is a mistake, or would like to rebook, please get in touch — we're happy to help.
               </p>
 
@@ -378,16 +376,16 @@ public class EmailService
                 ? ""
                 : $@"
               <div style='margin-top:20px;padding:14px 16px;border-left:3px solid {WARNING};background-color:{WARNING}15;border-radius:6px;'>
-                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
-                <div style='font-size:14px;color:{TEXT_PRIMARY};line-height:1.55;'>{reason}</div>
+                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_CREAM_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
+                <div style='font-size:14px;color:{TEXT_CREAM};line-height:1.55;'>{reason}</div>
               </div>";
 
             var content = $@"
-              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_CREAM_SOFT};'>
                 Hi {customerName},
               </p>
-              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
-                Your booking has been <strong style='color:{ACCENT};font-weight:700;'>cancelled</strong>. If this was unexpected, please reach out and we'll help sort it out.
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_CREAM_SOFT};'>
+                Your booking has been <strong style='color:{WARNING};font-weight:700;'>cancelled</strong>. If this was unexpected, please reach out and we'll help sort it out.
               </p>
 
               {StatusChip("Cancelled", WARNING)}
@@ -401,7 +399,7 @@ public class EmailService
 
               {reasonBlock}
 
-              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
+              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_CREAM_MUTED};'>
                 Want to play again? You can start a fresh booking anytime.
               </p>
 
@@ -447,40 +445,40 @@ public class EmailService
             var reasonBlock = string.IsNullOrWhiteSpace(reason)
                 ? ""
                 : $@"
-          <div style='margin-top:20px;padding:14px 16px;border-left:3px solid #A78BFA;background-color:#A78BFA15;border-radius:6px;'>
-            <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
-            <div style='font-size:14px;color:{TEXT_PRIMARY};line-height:1.55;'>{reason}</div>
-          </div>";
+              <div style='margin-top:20px;padding:14px 16px;border-left:3px solid {PURPLE};background-color:{PURPLE}15;border-radius:6px;'>
+                <div style='font-size:10px;font-weight:800;letter-spacing:1.8px;color:{TEXT_CREAM_MUTED};text-transform:uppercase;margin-bottom:5px;'>Reason</div>
+                <div style='font-size:14px;color:{TEXT_CREAM};line-height:1.55;'>{reason}</div>
+              </div>";
 
             var content = $@"
-          <p style='margin:0 0 8px;font-size:15px;color:{TEXT_SECONDARY};'>
-            Hi {customerName},
-          </p>
-          <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_SECONDARY};'>
-            Your booking has been <strong style='color:#A78BFA;font-weight:700;'>refunded</strong>. The amount will be returned to your original payment method.
-          </p>
+              <p style='margin:0 0 8px;font-size:15px;color:{TEXT_CREAM_SOFT};'>
+                Hi {customerName},
+              </p>
+              <p style='margin:0 0 24px;font-size:15px;line-height:1.65;color:{TEXT_CREAM_SOFT};'>
+                Your booking has been <strong style='color:{PURPLE};font-weight:700;'>refunded</strong>. The amount will be returned to your original payment method.
+              </p>
 
-          {StatusChip("Refunded", "#A78BFA")}
+              {StatusChip("Refunded", PURPLE)}
 
-          <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
-            {KvRow("Reference", referenceCode)}
-            {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
-            {amountRow}
-            {KvRow("Status", "Refunded", isLast: true)}
-          </table>
+              <table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'>
+                {KvRow("Reference", referenceCode)}
+                {KvRow("Schedule", $"{prettyDate} · {prettyTime}")}
+                {amountRow}
+                {KvRow("Status", "Refunded", isLast: true)}
+              </table>
 
-          {reasonBlock}
+              {reasonBlock}
 
-          <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
-            Refunds are typically processed within 3–5 business days, depending on your bank or e-wallet. If you haven't received it by then, please reach out and we'll check on it.
-          </p>
+              <p style='margin:24px 0 0;font-size:14px;line-height:1.65;color:{TEXT_CREAM_MUTED};'>
+                Refunds are typically processed within 3–5 business days, depending on your bank or e-wallet. If you haven't received it by then, please reach out and we'll check on it.
+              </p>
 
-          <p style='margin:16px 0 0;font-size:14px;line-height:1.65;color:{TEXT_MUTED};'>
-            We'd love to see you back on the court sometime soon!
-          </p>
+              <p style='margin:16px 0 0;font-size:14px;line-height:1.65;color:{TEXT_CREAM_MUTED};'>
+                We'd love to see you back on the court sometime soon!
+              </p>
 
-          {CtaButton($"{frontendUrl}/", "Book Again")}
-        ";
+              {CtaButton($"{frontendUrl}/", "Book Again")}
+            ";
 
             var html = WrapLayout("Booking Refunded", content);
             await SendAsync(apiKey, senderEmail, senderName, customerEmail, customerName,
