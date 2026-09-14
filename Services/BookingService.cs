@@ -117,7 +117,7 @@ public class BookingService : IBookingService
                 booking.ReferenceCode,
                 booking.Date.ToString("yyyy-MM-dd"),
                 $"{string.Join(", ", booking.Slots.Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"))}",
-                $"₱{booking.TotalAmount}"
+                $"₱{booking.TotalAmount:N2}"
             );
         }
         catch { }
@@ -346,6 +346,7 @@ public class BookingService : IBookingService
             .OrderBy(s => s.StartTime)
             .Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"));
         var dateStr = booking.Date.ToString("yyyy-MM-dd");
+        var amountStr = $"₱{booking.TotalAmount:N2}";   // ✅ NEW: formatted once
 
         try
         {
@@ -356,7 +357,8 @@ public class BookingService : IBookingService
                     booking.CustomerName,
                     booking.ReferenceCode,
                     dateStr,
-                    timeRange
+                    timeRange,
+                    amountStr                          // ✅ NEW
                 );
             }
             else if (booking.Status == "rejected")
@@ -366,7 +368,9 @@ public class BookingService : IBookingService
                     booking.CustomerName,
                     booking.ReferenceCode,
                     dateStr,
-                    timeRange
+                    timeRange,
+                    null,                              // reason
+                    amountStr                          // ✅ NEW
                 );
             }
             else if (booking.Status == "cancelled")
@@ -376,10 +380,12 @@ public class BookingService : IBookingService
                     booking.CustomerName,
                     booking.ReferenceCode,
                     dateStr,
-                    timeRange
+                    timeRange,
+                    null,                              // reason
+                    amountStr                          // ✅ NEW
                 );
             }
-            // ✅ NEW: refund email — only when there's an actual amount to refund
+            // ✅ refund email — only when there's an actual amount to refund
             else if (booking.Status == "refunded" && booking.TotalAmount > 0)
             {
                 await _email.NotifyCustomerBookingRefundedAsync(
@@ -388,7 +394,7 @@ public class BookingService : IBookingService
                     booking.ReferenceCode,
                     dateStr,
                     timeRange,
-                    $"₱{booking.TotalAmount:N2}"
+                    amountStr                          // already there
                 );
             }
             // "completed", "expired", "pending_payment", "payment_submitted"
