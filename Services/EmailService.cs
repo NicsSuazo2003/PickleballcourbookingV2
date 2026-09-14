@@ -8,22 +8,28 @@ public class EmailService
     private readonly IConfiguration _config;
     private readonly ILogger<EmailService> _logger;
 
-    // 🎨 Design tokens — matched to Center Court landing page (Forest Green theme)
-    private const string OUTER_BG = "#0A1408";         // deep forest (forest-950 feel)
-    private const string BODY_BG = "#14261A";          // mid forest (forest-900)
-    private const string CARD_BG = "#1B3524";          // forest-800
-    private const string BANNER_BG = "#1F3D2A";        // forest-750 — banner background
-    private const string ACCENT = "#FCD34D";           // gold-400 (primary CTA — kept)
-    private const string ACCENT_TEXT = "#0F172A";      // dark text on gold
-    private const string CYAN = "#22D3EE";             // cyan-400 (Open Play / "Paid" accent)
-    private const string CYAN_SOFT = "#A5F3FC";        // cyan-200
-    private const string TEXT_CREAM = "#F0EDE4";       // soft off-white — primary text
-    private const string TEXT_CREAM_MUTED = "#A9A69C"; // muted cream — labels
-    private const string TEXT_CREAM_SOFT = "#D9D4C7";  // slightly lighter cream for body
-    private const string DIVIDER = "#2F4A38";          // mid forest divider
-    private const string DANGER = "#F87171";           // red-400
-    private const string WARNING = "#FBBF24";          // amber-400
-    private const string PURPLE = "#A78BFA";           // purple-400 (refund)
+    private const string OUTER_BG = "#0D1A0D";  // forest-950
+    private const string BODY_BG = "#1A2E1A";  // forest-900
+    private const string CARD_BG = "#243024";  // forest-800
+    private const string BANNER_BG = "#2A3A2A";  // forest-700
+    private const string DIVIDER = "#324232";  // forest-600
+    private const string BORDER_SOFT = "#3A4A3A";  // forest-500
+
+    private const string ACCENT = "#D4AF37";  // gold-400
+    private const string ACCENT_TEXT = "#0D1A0D";  // forest-950 (dark text on gold)
+    private const string ACCENT_SOFT = "#EAD79E";  // gold-200
+    private const string GOLD_300 = "#DEC36E";  // gold-300
+
+    private const string CYAN = "#22D3EE";  // cyan-400 (Open Play — keep)
+    private const string TEXT_CREAM = "#F5F0E8";  // cream
+    private const string TEXT_CREAM_MUTED = "#B8B0A0";  // cream-muted
+    private const string TEXT_CREAM_SOFT = "#E8E0D2";  // cream-dark
+
+    private const string DANGER = "#E74C3C";  // error
+    private const string WARNING = "#F39C12";  // warning
+    private const string SUCCESS = "#2ECC71";  // success
+    private const string PURPLE = "#A78BFA";  // refund (no tailwind equivalent)
+
 
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
