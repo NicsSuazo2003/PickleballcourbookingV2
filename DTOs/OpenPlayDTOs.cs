@@ -10,6 +10,7 @@ public record CreateOpenPlaySessionRequest(
     decimal PricePerPlayer,
     string SkillLevel,
     string? HostName,
+    string? Title,
     string? Description
 );
 
@@ -22,6 +23,7 @@ public record UpdateOpenPlaySessionRequest(
     decimal PricePerPlayer,
     string SkillLevel,
     string? HostName,
+    string? Title,
     string? Description,
     bool IsActive
 );
@@ -46,6 +48,7 @@ public record OpenPlaySessionDto(
     decimal PricePerPlayer,
     string SkillLevel,
     string? HostName,
+    string? Title,
     string? Description,
     string Status,
     bool IsActive,

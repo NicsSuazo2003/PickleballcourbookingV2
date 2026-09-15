@@ -1,4 +1,5 @@
-// Entities/OpenPlaySession.cs
+using System;
+
 namespace PickleballBookingSystem.Entities;
 
 public class OpenPlaySession
@@ -11,7 +12,14 @@ public class OpenPlaySession
     public Guid CourtId { get; set; }
     public Court Court { get; set; } = null!;
 
-    public DateTime Date { get; set; }
+    // ✅ FIX: Ensure Date is always UTC
+    private DateTime _date;
+    public DateTime Date
+    {
+        get => _date;
+        set => _date = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    }
+
     public TimeOnly StartTime { get; set; }
     public TimeOnly EndTime { get; set; }
 
@@ -22,11 +30,18 @@ public class OpenPlaySession
 
     public string SkillLevel { get; set; } = "All Levels";
     public string? HostName { get; set; }
+    public string? Title { get; set; }
     public string? Description { get; set; }
 
     public bool IsActive { get; set; } = true;
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    // ✅ FIX: Ensure CreatedAt is always UTC
+    private DateTime _createdAt;
+    public DateTime CreatedAt
+    {
+        get => _createdAt;
+        set => _createdAt = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    }
 
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
 }

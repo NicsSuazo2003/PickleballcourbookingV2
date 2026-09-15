@@ -199,6 +199,7 @@ public class OpenPlayService : IOpenPlayService
             PricePerPlayer = request.PricePerPlayer,
             SkillLevel = string.IsNullOrWhiteSpace(request.SkillLevel) ? "All Levels" : request.SkillLevel,
             HostName = request.HostName,
+            Title = request.Title,
             Description = request.Description,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
@@ -243,6 +244,7 @@ public class OpenPlayService : IOpenPlayService
         session.PricePerPlayer = request.PricePerPlayer;
         session.SkillLevel = string.IsNullOrWhiteSpace(request.SkillLevel) ? "All Levels" : request.SkillLevel;
         session.HostName = request.HostName;
+        session.Title = request.Title;
         session.Description = request.Description;
         session.IsActive = request.IsActive;
 
@@ -336,6 +338,7 @@ public class OpenPlayService : IOpenPlayService
         s.PricePerPlayer,
         s.SkillLevel,
         s.HostName,
+        s.Title,
         s.Description,
         ComputeStatus(s),
         s.IsActive,
