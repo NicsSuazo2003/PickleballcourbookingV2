@@ -158,7 +158,7 @@ public class OpenPlayService : IOpenPlayService
     public async Task<List<OpenPlaySessionDto>> AdminGetAllSessionsAsync(Guid clientId)
     {
         var sessions = await _db.OpenPlaySessions
-            .Where(s => s.ClientId == clientId)
+            .Where(s => s.ClientId == clientId && s.IsActive)   // ✅ filter inactive
             .Include(s => s.Court)
             .Include(s => s.SessionCourts).ThenInclude(sc => sc.Court)
             .OrderByDescending(s => s.Date).ThenBy(s => s.StartTime)
@@ -325,7 +325,7 @@ public class OpenPlayService : IOpenPlayService
             .FirstOrDefaultAsync(s => s.Id == id && s.ClientId == clientId)
             ?? throw new KeyNotFoundException("Open Play session not found");
 
-        session.IsActive = false;
+        _db.OpenPlaySessions.Remove(session);   // ✅ hard delete
         await _db.SaveChangesAsync();
     }
 
