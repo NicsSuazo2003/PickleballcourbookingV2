@@ -25,6 +25,7 @@ public class OpenPlayService : IOpenPlayService
         var sessions = await _db.OpenPlaySessions
             .Where(s => s.ClientId == clientId && s.IsActive && s.Date.Date >= todayDate)
             .Include(s => s.Court)
+            .Include(s => s.SessionCourts).ThenInclude(sc => sc.Court)
             .OrderBy(s => s.Date).ThenBy(s => s.StartTime)
             .ToListAsync();
 
@@ -35,6 +36,7 @@ public class OpenPlayService : IOpenPlayService
     {
         var session = await _db.OpenPlaySessions
             .Include(s => s.Court)
+            .Include(s => s.SessionCourts).ThenInclude(sc => sc.Court)
             .FirstOrDefaultAsync(s => s.Id == id && s.ClientId == clientId && s.IsActive);
 
         return session == null ? null : MapToDto(session);
@@ -61,19 +63,18 @@ public class OpenPlayService : IOpenPlayService
 
         var referenceCode = $"OP-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
 
-        // ✅ FIX: Ensure Date is UTC
         var utcDate = DateTime.SpecifyKind(session.Date, DateTimeKind.Utc);
 
         var booking = new Booking
         {
-            CourtId = session.CourtId,
+            CourtId = session.CourtId,   // primary court — the physical court assigned to the player
             ClientId = clientId,
             OpenPlaySessionId = session.Id,
             CustomerName = request.CustomerName,
             CustomerEmail = request.CustomerEmail,
             CustomerPhone = request.CustomerPhone,
             ReferenceCode = referenceCode,
-            Date = utcDate, // ✅ Fixed - now UTC
+            Date = utcDate,
             TotalAmount = session.PricePerPlayer,
             Status = "pending_payment",
             PaymentMethod = "gcash",
@@ -85,7 +86,7 @@ public class OpenPlayService : IOpenPlayService
                 new TimeSlot
                 {
                     CourtId = session.CourtId,
-                    Date = utcDate, // ✅ Fixed - now UTC
+                    Date = utcDate,
                     StartTime = session.StartTime,
                     EndTime = session.EndTime,
                     Price = session.PricePerPlayer,
@@ -113,14 +114,8 @@ public class OpenPlayService : IOpenPlayService
         return MapToBookingDto(booking, session.Court?.Name ?? "");
     }
 
-    /// <summary>
-    /// Public-safe player roster for a session. Returns first-name + last-initial only,
-    /// plus status and join time. Never exposes email, phone, payment data, or reference codes.
-    /// </summary>
     public async Task<List<PublicOpenPlayPlayerDto>> GetPublicPlayersAsync(Guid id, Guid clientId)
     {
-        // Only return rosters for active, non-cancelled, non-past sessions.
-        // This blocks enumeration of historic sessions.
         var session = await _db.OpenPlaySessions
             .FirstOrDefaultAsync(s => s.Id == id && s.ClientId == clientId && s.IsActive)
             ?? throw new KeyNotFoundException("Open Play session not found");
@@ -130,8 +125,6 @@ public class OpenPlayService : IOpenPlayService
         if (sessionEnd < now)
             throw new KeyNotFoundException("Open Play session has ended");
 
-        // Only include players who actually hold a spot. Skip cancelled/rejected/expired
-        // so the count matches what a visitor would see in the session summary.
         var bookings = await _db.Bookings
             .Where(b => b.OpenPlaySessionId == id
                      && b.ClientId == clientId
@@ -140,7 +133,7 @@ public class OpenPlayService : IOpenPlayService
                      && b.Status != "expired"
                      && b.Status != "refunded")
             .OrderBy(b => b.CreatedAt)
-            .Take(50) // hard cap — no session should exceed this, but prevents runaway payloads
+            .Take(50)
             .ToListAsync();
 
         return bookings.Select(b => new PublicOpenPlayPlayerDto(
@@ -151,10 +144,6 @@ public class OpenPlayService : IOpenPlayService
         )).ToList();
     }
 
-    /// <summary>
-    /// "Juan Dela Cruz" → "Juan D." — privacy-safe display name.
-    /// Single-word names are shown as-is.
-    /// </summary>
     private static string ToDisplayName(string fullName)
     {
         if (string.IsNullOrWhiteSpace(fullName)) return "Player";
@@ -168,6 +157,7 @@ public class OpenPlayService : IOpenPlayService
         var sessions = await _db.OpenPlaySessions
             .Where(s => s.ClientId == clientId)
             .Include(s => s.Court)
+            .Include(s => s.SessionCourts).ThenInclude(sc => sc.Court)
             .OrderByDescending(s => s.Date).ThenBy(s => s.StartTime)
             .ToListAsync();
 
@@ -179,18 +169,38 @@ public class OpenPlayService : IOpenPlayService
         if (request.MaxPlayers < 2 || request.MaxPlayers > 20)
             throw new InvalidOperationException("Max players must be between 2 and 20.");
 
-        if (!Guid.TryParse(request.CourtId, out var courtGuid))
-            throw new InvalidOperationException("Invalid court.");
+        if (request.CourtIds == null || request.CourtIds.Length == 0)
+            throw new InvalidOperationException("Please select at least one court.");
 
-        var court = await _db.Courts
-            .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
-            ?? throw new KeyNotFoundException("Court not found");
+        // Parse + dedupe
+        var courtGuids = new List<Guid>();
+        foreach (var raw in request.CourtIds)
+        {
+            if (!Guid.TryParse(raw, out var g))
+                throw new InvalidOperationException($"Invalid court id: {raw}");
+            if (!courtGuids.Contains(g))
+                courtGuids.Add(g);
+        }
 
-        // ✅ Already correct - using UTC
+        // Validate all belong to this client
+        var courts = await _db.Courts
+            .Where(c => courtGuids.Contains(c.Id) && c.ClientId == clientId)
+            .ToListAsync();
+
+        if (courts.Count != courtGuids.Count)
+            throw new KeyNotFoundException("One or more courts not found for this client.");
+
+        // Preserve order of request.CourtIds so first = primary
+        var orderedCourts = courtGuids
+            .Select(g => courts.First(c => c.Id == g))
+            .ToList();
+        var primaryCourt = orderedCourts[0];
+
         var session = new OpenPlaySession
         {
             ClientId = clientId,
-            CourtId = court.Id,
+            CourtId = primaryCourt.Id,
+            Court = primaryCourt,
             Date = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc),
             StartTime = TimeOnly.Parse(request.StartTime),
             EndTime = TimeOnly.Parse(request.EndTime),
@@ -205,10 +215,24 @@ public class OpenPlayService : IOpenPlayService
             CreatedAt = DateTime.UtcNow
         };
 
+        // ✅ Link all selected courts
+        foreach (var g in courtGuids)
+        {
+            session.SessionCourts.Add(new OpenPlaySessionCourt
+            {
+                OpenPlaySessionId = session.Id,
+                CourtId = g,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
         _db.OpenPlaySessions.Add(session);
         await _db.SaveChangesAsync();
 
-        session.Court = court;
+        // Populate nav for MapToDto
+        foreach (var sc in session.SessionCourts)
+            sc.Court = courts.First(c => c.Id == sc.CourtId);
+
         return MapToDto(session);
     }
 
@@ -216,6 +240,7 @@ public class OpenPlayService : IOpenPlayService
     {
         var session = await _db.OpenPlaySessions
             .Include(s => s.Court)
+            .Include(s => s.SessionCourts).ThenInclude(sc => sc.Court)
             .FirstOrDefaultAsync(s => s.Id == id && s.ClientId == clientId)
             ?? throw new KeyNotFoundException("Open Play session not found");
 
@@ -225,18 +250,50 @@ public class OpenPlayService : IOpenPlayService
         if (request.MaxPlayers < session.CurrentPlayers)
             throw new InvalidOperationException("Max players cannot be less than the number of players who already joined.");
 
-        if (!Guid.TryParse(request.CourtId, out var courtGuid))
-            throw new InvalidOperationException("Invalid court.");
+        if (request.CourtIds == null || request.CourtIds.Length == 0)
+            throw new InvalidOperationException("Please select at least one court.");
 
-        if (courtGuid != session.CourtId)
+        // Parse + dedupe
+        var courtGuids = new List<Guid>();
+        foreach (var raw in request.CourtIds)
         {
-            var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
-                ?? throw new KeyNotFoundException("Court not found");
-            session.CourtId = court.Id;
-            session.Court = court;
+            if (!Guid.TryParse(raw, out var g))
+                throw new InvalidOperationException($"Invalid court id: {raw}");
+            if (!courtGuids.Contains(g))
+                courtGuids.Add(g);
         }
 
-        // ✅ Already correct - using UTC
+        var courts = await _db.Courts
+            .Where(c => courtGuids.Contains(c.Id) && c.ClientId == clientId)
+            .ToListAsync();
+
+        if (courts.Count != courtGuids.Count)
+            throw new KeyNotFoundException("One or more courts not found.");
+
+        var orderedCourts = courtGuids
+            .Select(g => courts.First(c => c.Id == g))
+            .ToList();
+        var primaryCourt = orderedCourts[0];
+
+        session.CourtId = primaryCourt.Id;
+        session.Court = primaryCourt;
+
+        // ✅ Replace join rows
+        var existing = await _db.OpenPlaySessionCourts
+            .Where(sc => sc.OpenPlaySessionId == session.Id)
+            .ToListAsync();
+        _db.OpenPlaySessionCourts.RemoveRange(existing);
+
+        foreach (var g in courtGuids)
+        {
+            _db.OpenPlaySessionCourts.Add(new OpenPlaySessionCourt
+            {
+                OpenPlaySessionId = session.Id,
+                CourtId = g,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
         session.Date = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc);
         session.StartTime = TimeOnly.Parse(request.StartTime);
         session.EndTime = TimeOnly.Parse(request.EndTime);
@@ -249,6 +306,13 @@ public class OpenPlayService : IOpenPlayService
         session.IsActive = request.IsActive;
 
         await _db.SaveChangesAsync();
+
+        // Reload join rows + nav
+        session.SessionCourts = await _db.OpenPlaySessionCourts
+            .Where(sc => sc.OpenPlaySessionId == session.Id)
+            .Include(sc => sc.Court)
+            .ToListAsync();
+
         return MapToDto(session);
     }
 
@@ -325,25 +389,46 @@ public class OpenPlayService : IOpenPlayService
         return "upcoming";
     }
 
-    private static OpenPlaySessionDto MapToDto(OpenPlaySession s) => new(
-        s.Id.ToString(),
-        s.CourtId.ToString(),
-        s.Court?.Name ?? "",
-        s.Date.ToString("yyyy-MM-dd"),
-        s.StartTime.ToString("HH:mm"),
-        s.EndTime.ToString("HH:mm"),
-        s.MaxPlayers,
-        s.CurrentPlayers,
-        Math.Max(0, s.MaxPlayers - s.CurrentPlayers),
-        s.PricePerPlayer,
-        s.SkillLevel,
-        s.HostName,
-        s.Title,
-        s.Description,
-        ComputeStatus(s),
-        s.IsActive,
-        s.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
-    );
+    private static OpenPlaySessionDto MapToDto(OpenPlaySession s)
+    {
+        // ✅ Build courts list from join table, fall back to primary court
+        var courts = (s.SessionCourts ?? new List<OpenPlaySessionCourt>())
+            .Select(sc => new OpenPlayCourtDto(
+                sc.CourtId.ToString(),
+                sc.Court?.Name ?? ""
+            ))
+            .ToList();
+
+        if (courts.Count == 0 && s.Court != null)
+        {
+            courts.Add(new OpenPlayCourtDto(s.CourtId.ToString(), s.Court.Name));
+        }
+
+        var primaryName = s.Court?.Name
+            ?? courts.FirstOrDefault()?.Name
+            ?? "";
+
+        return new OpenPlaySessionDto(
+            s.Id.ToString(),
+            s.CourtId.ToString(),
+            primaryName,
+            courts,
+            s.Date.ToString("yyyy-MM-dd"),
+            s.StartTime.ToString("HH:mm"),
+            s.EndTime.ToString("HH:mm"),
+            s.MaxPlayers,
+            s.CurrentPlayers,
+            Math.Max(0, s.MaxPlayers - s.CurrentPlayers),
+            s.PricePerPlayer,
+            s.SkillLevel,
+            s.HostName,
+            s.Title,
+            s.Description,
+            ComputeStatus(s),
+            s.IsActive,
+            s.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        );
+    }
 
     private static BookingDto MapToBookingDto(Booking b, string courtName)
     {

@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<PriceRule> PriceRules => Set<PriceRule>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>();
+    public DbSet<OpenPlaySessionCourt> OpenPlaySessionCourts => Set<OpenPlaySessionCourt>();  // ✅ NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -124,7 +125,7 @@ public class AppDbContext : DbContext
                 .HasForeignKey(b => b.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // ✅ NEW - Open Play link
+            // ✅ Open Play link
             e.Property(b => b.OpenPlaySessionId).HasColumnName("OpenPlaySessionId");
             e.HasOne(b => b.OpenPlaySession)
                 .WithMany(s => s.Bookings)
@@ -192,7 +193,7 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // ✅ NEW - OpenPlaySession configuration
+        // ✅ OpenPlaySession configuration
         modelBuilder.Entity<OpenPlaySession>(e =>
         {
             e.Property(s => s.ClientId).HasColumnName("ClientId");
@@ -207,6 +208,7 @@ public class AppDbContext : DbContext
                 .HasColumnType("decimal(10,2)");
             e.Property(s => s.SkillLevel).HasColumnName("SkillLevel");
             e.Property(s => s.HostName).HasColumnName("HostName");
+            e.Property(s => s.Title).HasColumnName("Title");
             e.Property(s => s.Description).HasColumnName("Description");
             e.Property(s => s.IsActive).HasColumnName("IsActive");
             e.Property(s => s.CreatedAt).HasColumnName("CreatedAt");
@@ -221,9 +223,30 @@ public class AppDbContext : DbContext
                 .HasForeignKey(s => s.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // ✅ NEW — many courts per session
+            e.HasMany(s => s.SessionCourts)
+                .WithOne(sc => sc.OpenPlaySession)
+                .HasForeignKey(sc => sc.OpenPlaySessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             // ✅ Configure Date to be stored as UTC
             e.Property(s => s.Date)
                 .HasConversion(new DateTimeToUtcConverter());
+        });
+
+        // ✅ NEW — OpenPlaySessionCourt join configuration
+        modelBuilder.Entity<OpenPlaySessionCourt>(e =>
+        {
+            e.Property(sc => sc.OpenPlaySessionId).HasColumnName("OpenPlaySessionId");
+            e.Property(sc => sc.CourtId).HasColumnName("CourtId");
+            e.Property(sc => sc.CreatedAt).HasColumnName("CreatedAt");
+
+            e.HasIndex(sc => new { sc.OpenPlaySessionId, sc.CourtId }).IsUnique();
+
+            e.HasOne(sc => sc.Court)
+                .WithMany()
+                .HasForeignKey(sc => sc.CourtId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 

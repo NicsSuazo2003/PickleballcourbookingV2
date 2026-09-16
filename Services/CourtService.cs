@@ -104,16 +104,17 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
+        // ✅ Slots taken by regular bookings on THIS court
         var bookedTimes = await _db.TimeSlots
-    .Where(s => s.Date.Date == date.Date && s.Booking.CourtId == courtId)
-    .Join(_db.Bookings.Where(b =>
-            b.Status != "cancelled"
-            && b.Status != "expired"
-            && b.Status != "rejected"      // ✅ NEW
-            && b.Status != "refunded"       // ✅ NEW — refunded frees the slot
-            && b.ClientId == clientId),
-        s => s.BookingId, b => b.Id, (s, b) => s.StartTime)
-    .ToListAsync();
+            .Where(s => s.Date.Date == date.Date && s.Booking.CourtId == courtId)
+            .Join(_db.Bookings.Where(b =>
+                    b.Status != "cancelled"
+                    && b.Status != "expired"
+                    && b.Status != "rejected"
+                    && b.Status != "refunded"
+                    && b.ClientId == clientId),
+                s => s.BookingId, b => b.Id, (s, b) => s.StartTime)
+            .ToListAsync();
 
         var blockedDates = await _db.BlockedDates
             .Where(b => b.Date.Date == date.Date && (b.CourtId == null || b.CourtId == courtId) && b.ClientId == clientId)
@@ -122,6 +123,15 @@ public class CourtService : ICourtService
         var priceRules = await _db.PriceRules
             .Where(r => r.IsActive && r.ClientId == clientId)
             .OrderByDescending(r => r.Priority)
+            .ToListAsync();
+
+        // ✅ NEW — hours occupied by any active Open Play session using this court
+        var openPlayWindows = await _db.OpenPlaySessions
+            .Where(s => s.IsActive
+                     && s.ClientId == clientId
+                     && s.Date.Date == date.Date
+                     && s.SessionCourts.Any(sc => sc.CourtId == courtId))
+            .Select(s => new { s.StartTime, s.EndTime })
             .ToListAsync();
 
         var dayOfWeek = date.DayOfWeek.ToString();
@@ -142,8 +152,7 @@ public class CourtService : ICourtService
             }
         }
 
-        // ✅ Fix: Use Philippine time (UTC+8) for checking past slots
-        var phTime = DateTime.UtcNow.AddHours(8); // UTC+8 (Philippine Time)
+        var phTime = DateTime.UtcNow.AddHours(8);
         var isToday = date.Date == phTime.Date;
 
         var slots = new List<TimeSlotAvailabilityDto>();
@@ -154,10 +163,13 @@ public class CourtService : ICourtService
             var startTime = $"{h % 24:D2}:00";
             var endTime = $"{(h + 1) % 24:D2}:00";
 
-            // ✅ Check if slot is in the past based on Philippine time
             var isPast = isToday && (h < phTime.Hour || (h == phTime.Hour && 0 < phTime.Minute));
             var isBooked = bookedSet.Contains(startTime);
             var isBlocked = blockedSet.Contains(h);
+
+            // ✅ NEW — blocked by an active Open Play session window
+            var isOpenPlayBlocked = openPlayWindows.Any(w =>
+                w.StartTime.Hour <= h && h < (w.EndTime.Hour == 0 ? 24 : w.EndTime.Hour));
 
             var slotPrice = court.PricePerHour;
             foreach (var rule in priceRules)
@@ -176,7 +188,7 @@ public class CourtService : ICourtService
                 $"slot-{courtId}-{date:yyyy-MM-dd}-{h}",
                 date.ToString("yyyy-MM-dd"),
                 startTime, endTime,
-                !isPast && !isBooked && !isBlocked,
+                !isPast && !isBooked && !isBlocked && !isOpenPlayBlocked,
                 slotPrice));
         }
 

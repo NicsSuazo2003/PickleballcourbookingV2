@@ -9,8 +9,13 @@ public class OpenPlaySession
     public Guid ClientId { get; set; }
     public Client Client { get; set; } = null!;
 
+    // Primary court (kept for backward compatibility — first court in SessionCourts)
     public Guid CourtId { get; set; }
     public Court Court { get; set; } = null!;
+
+    // ✅ NEW — every court this session uses
+    public ICollection<OpenPlaySessionCourt> SessionCourts { get; set; }
+        = new List<OpenPlaySessionCourt>();
 
     // ✅ FIX: Ensure Date is always UTC
     private DateTime _date;

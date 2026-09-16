@@ -2,7 +2,7 @@
 namespace PickleballBookingSystem.DTOs;
 
 public record CreateOpenPlaySessionRequest(
-    string CourtId,
+    string[] CourtIds,              // ✅ was single CourtId
     string Date,
     string StartTime,
     string EndTime,
@@ -15,7 +15,7 @@ public record CreateOpenPlaySessionRequest(
 );
 
 public record UpdateOpenPlaySessionRequest(
-    string CourtId,
+    string[] CourtIds,              // ✅ was single CourtId
     string Date,
     string StartTime,
     string EndTime,
@@ -35,10 +35,16 @@ public record JoinOpenPlayRequest(
     string? Notes
 );
 
+public record OpenPlayCourtDto(
+    string Id,
+    string Name
+);
+
 public record OpenPlaySessionDto(
     string Id,
-    string CourtId,
-    string CourtName,
+    string CourtId,                 // primary court
+    string CourtName,               // primary court name
+    List<OpenPlayCourtDto> Courts,  // ✅ NEW — all courts
     string Date,
     string StartTime,
     string EndTime,
@@ -76,6 +82,7 @@ public record OpenPlayPlayerDto(
     decimal AmountPaid,
     string JoinedAt
 );
+
 public record PublicOpenPlayPlayerDto(
     string BookingId,
     string DisplayName,
