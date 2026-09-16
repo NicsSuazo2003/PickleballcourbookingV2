@@ -123,7 +123,7 @@ public class OpenPlayController : ControllerBase
     }
 
     [Authorize(Roles = "admin")]
-    [HttpGet("open-play/{id}/players")]
+    [HttpGet("admin/open-play/{id}/players")]
     public async Task<ActionResult<List<OpenPlayPlayerDto>>> AdminGetPlayers(Guid id)
     {
         var clientId = await GetClientId();
