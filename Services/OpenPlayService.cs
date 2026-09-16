@@ -65,9 +65,12 @@ public class OpenPlayService : IOpenPlayService
 
         var utcDate = DateTime.SpecifyKind(session.Date, DateTimeKind.Utc);
 
+        // ✅ Free sessions skip the payment flow entirely
+        var isFree = session.PricePerPlayer <= 0;
+
         var booking = new Booking
         {
-            CourtId = session.CourtId,   // primary court — the physical court assigned to the player
+            CourtId = session.CourtId,
             ClientId = clientId,
             OpenPlaySessionId = session.Id,
             CustomerName = request.CustomerName,
@@ -76,11 +79,11 @@ public class OpenPlayService : IOpenPlayService
             ReferenceCode = referenceCode,
             Date = utcDate,
             TotalAmount = session.PricePerPlayer,
-            Status = "pending_payment",
-            PaymentMethod = "gcash",
+            Status = isFree ? "confirmed" : "pending_payment",                 // ✅
+            PaymentMethod = isFree ? "free" : "gcash",                          // ✅
             Notes = request.Notes,
             CreatedAt = DateTime.UtcNow,
-            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
+            PaymentExpiresAt = isFree ? null : DateTime.UtcNow.AddMinutes(15),  // ✅
             Slots = new List<TimeSlot>
             {
                 new TimeSlot
@@ -103,10 +106,10 @@ public class OpenPlayService : IOpenPlayService
         {
             await _email.NotifyAdminNewBookingAsync(
                 booking.CustomerName,
-                booking.ReferenceCode + " [OPEN PLAY]",
+                booking.ReferenceCode + (isFree ? " [OPEN PLAY - FREE]" : " [OPEN PLAY]"),
                 booking.Date.ToString("yyyy-MM-dd"),
                 $"{session.StartTime:HH:mm}-{session.EndTime:HH:mm}",
-                $"₱{booking.TotalAmount}"
+                isFree ? "FREE" : $"₱{booking.TotalAmount}"
             );
         }
         catch { }
