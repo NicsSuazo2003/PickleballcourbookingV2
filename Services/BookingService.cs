@@ -268,6 +268,10 @@ public class BookingService : IBookingService
             booking.PaymentScreenshot = screenshotUrl;
 
         booking.PaymentReference = paymentReference;
+
+        if (!string.IsNullOrWhiteSpace(paymentMethod))
+            booking.PaymentMethod = paymentMethod;
+
         booking.Status = "payment_submitted";
         await _db.SaveChangesAsync();
 

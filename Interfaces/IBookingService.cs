@@ -16,7 +16,7 @@ public interface IBookingService
     Task<BookingDto> UploadPaymentAsync(Guid id, string screenshotBase64, string? paymentReference, Guid clientId);
     // ✅ FIXED: screenshotBase64 is now nullable — a payment can be submitted
     // with just a reference number and no screenshot.
-    Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string? screenshotBase64, string? paymentReference, Guid clientId);
+    Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string? screenshotBase64, string? paymentReference, string? paymentMethod, Guid clientId);
     Task ConfirmPaymentAsync(Guid id, Guid clientId);
     Task CancelBookingAsync(Guid id, Guid clientId);
     Task AutoCompletePastBookingsAsync(Guid clientId);

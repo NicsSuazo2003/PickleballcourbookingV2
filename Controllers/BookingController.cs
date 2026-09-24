@@ -12,18 +12,18 @@ public class BookingController : ControllerBase
     private readonly IBookingService _booking;
     private readonly IConfiguration _config;
     private readonly ClientResolver _clientResolver;
-    private readonly IClientService _clientService; // ✅ Add this
+    private readonly IClientService _clientService;
 
     public BookingController(
         IBookingService booking,
         IConfiguration config,
         ClientResolver clientResolver,
-        IClientService clientService) // ✅ Inject this
+        IClientService clientService)
     {
         _booking = booking;
         _config = config;
         _clientResolver = clientResolver;
-        _clientService = clientService; // ✅ Store it
+        _clientService = clientService;
     }
 
     private async Task<Guid> GetClientId()
@@ -32,7 +32,6 @@ public class BookingController : ControllerBase
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
-        // ✅ Use the actual client service to get the client ID
         try
         {
             return await _clientService.GetClientIdBySubdomainAsync(subdomain);
@@ -71,11 +70,13 @@ public class BookingController : ControllerBase
         return Ok(summaries);
     }
 
-    // ✅ FIXED: screenshot is now optional (IFormFile?). A missing file no
-    // longer 400s — only a missing/blank reference number does. Supabase is
-    // only contacted when a file was actually sent.
+    // ✅ UPDATED — accepts an optional paymentMethod from the checkout form
     [HttpPost("{id}/upload-payment")]
-    public async Task<ActionResult<BookingDto>> UploadPayment(Guid id, [FromForm] string paymentReference, IFormFile? screenshot)
+    public async Task<ActionResult<BookingDto>> UploadPayment(
+        Guid id,
+        [FromForm] string paymentReference,
+        [FromForm] string? paymentMethod,
+        IFormFile? screenshot)
     {
         if (string.IsNullOrWhiteSpace(paymentReference))
             return BadRequest(new { message = "Payment reference is required" });
@@ -108,7 +109,14 @@ public class BookingController : ControllerBase
             screenshotUrl = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
         }
 
-        var booking = await _booking.UploadPaymentScreenshotAsync(id, screenshotUrl, paymentReference, clientId);
+        // ✅ Pass paymentMethod through to the service
+        var booking = await _booking.UploadPaymentScreenshotAsync(
+            id,
+            screenshotUrl,
+            paymentReference,
+            paymentMethod,
+            clientId);
+
         return Ok(booking);
     }
 
