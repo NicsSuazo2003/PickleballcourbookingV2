@@ -21,5 +21,7 @@ public interface IBookingService
     Task CancelBookingAsync(Guid id, Guid clientId);
     Task AutoCompletePastBookingsAsync(Guid clientId);
     Task CancelExpiredPaymentsAsync(Guid clientId);
+    Task<List<BookingSummaryDto>> TrackBookingSummariesByEmailAsync(string email, Guid clientId);
+
     Task<BookingDto> CreateStaffBookingAsync(StaffCreateBookingRequest request, Guid clientId);
 }

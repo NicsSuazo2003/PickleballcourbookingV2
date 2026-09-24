@@ -69,3 +69,15 @@ public record StaffSlotRequest(
     string StartTime,
     string EndTime
 );
+
+public record BookingSummaryDto(
+    string Id,
+    string ReferenceCode,
+    string CourtName,
+    string Date,
+    string StartTime,
+    string EndTime,
+    string Status,
+    decimal TotalAmount,
+    string CreatedAt
+);

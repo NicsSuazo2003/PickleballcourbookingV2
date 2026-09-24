@@ -581,4 +581,39 @@ public class BookingService : IBookingService
 
         return MapToDto(booking, court.Name);
     }
+    public async Task<List<BookingSummaryDto>> TrackBookingSummariesByEmailAsync(string email, Guid clientId)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            throw new InvalidOperationException("Email is required.");
+
+        var normalized = email.Trim().ToLowerInvariant();
+
+        var bookings = await _db.Bookings
+            .Where(b => b.ClientId == clientId
+                     && b.CustomerEmail.ToLower() == normalized
+                     && (b.Status == "pending_payment" || b.Status == "payment_submitted"))
+            .Include(b => b.Court)
+            .Include(b => b.Slots)
+            .OrderByDescending(b => b.CreatedAt)
+            .Take(20)
+            .ToListAsync();
+
+        return bookings.Select(b =>
+        {
+            var firstSlot = b.Slots.OrderBy(s => s.StartTime).FirstOrDefault();
+            var lastSlot = b.Slots.OrderByDescending(s => s.EndTime).FirstOrDefault();
+
+            return new BookingSummaryDto(
+                b.Id.ToString(),
+                b.ReferenceCode,
+                b.Court?.Name ?? "",
+                b.Date.ToString("yyyy-MM-dd"),
+                firstSlot?.StartTime.ToString("HH:mm") ?? "",
+                lastSlot?.EndTime.ToString("HH:mm") ?? "",
+                b.Status,
+                b.TotalAmount,
+                b.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            );
+        }).ToList();
+    }
 }

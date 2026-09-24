@@ -60,6 +60,17 @@ public class BookingController : ControllerBase
         return Ok(booking);
     }
 
+    [HttpGet("track-summaries-by-email")]
+    public async Task<ActionResult<List<BookingSummaryDto>>> TrackSummariesByEmail([FromQuery] string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return BadRequest(new { message = "Email is required" });
+
+        var clientId = await GetClientId();
+        var summaries = await _booking.TrackBookingSummariesByEmailAsync(email, clientId);
+        return Ok(summaries);
+    }
+
     // ✅ FIXED: screenshot is now optional (IFormFile?). A missing file no
     // longer 400s — only a missing/blank reference number does. Supabase is
     // only contacted when a file was actually sent.
