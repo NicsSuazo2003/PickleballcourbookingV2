@@ -253,7 +253,12 @@ public class BookingService : IBookingService
     // with just a reference number and no screenshot. We only overwrite
     // PaymentScreenshot when an actual URL was passed in, so an existing
     // screenshot from a retry never gets wiped out by a null on a later call.
-    public async Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string? screenshotUrl, string? paymentReference, Guid clientId)
+    public async Task<BookingDto> UploadPaymentScreenshotAsync(
+     Guid id,
+     string? screenshotUrl,
+     string? paymentReference,
+     string? paymentMethod,
+     Guid clientId)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
@@ -269,6 +274,7 @@ public class BookingService : IBookingService
 
         booking.PaymentReference = paymentReference;
 
+        // ✅ Save the selected method name (from the frontend)
         if (!string.IsNullOrWhiteSpace(paymentMethod))
             booking.PaymentMethod = paymentMethod;
 
