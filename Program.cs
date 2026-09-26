@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -36,7 +37,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+
+            // ✅ FIX: Tell the JWT handler where to find the role and name claims.
+            // TokenService emits ClaimTypes.Role / ClaimTypes.Name (long URIs),
+            // but without these lines the handler defaults to "role" / "name"
+            // and [Authorize(Roles = "...")] fails with a 403 + empty body.
+            RoleClaimType = ClaimTypes.Role,
+            NameClaimType = ClaimTypes.Name,
         };
     });
 
