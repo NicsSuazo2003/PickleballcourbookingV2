@@ -112,8 +112,10 @@ public class PricingRuleService : IPricingRuleService
     }
 
     /// <summary>
-    /// Pure, synchronous resolver. Callers who already have the court (with
-    /// .PricingRules loaded) should call this to avoid extra DB roundtrips.
+    /// Resolves the hourly price for a slot.
+    ///   1. If any pricing rule matches (by day + time, highest priority wins),
+    ///      return that rule's price.
+    ///   2. Otherwise fall back to the court's base rate.
     /// </summary>
     public decimal ResolvePriceFromCourt(Court court, DateOnly date, TimeOnly startTime)
     {
@@ -137,10 +139,9 @@ public class PricingRuleService : IPricingRuleService
             if (match is not null) return match.PricePerHour;
         }
 
-        // ── Fallback (unchanged legacy behavior) ────────────────────────
-        var hour = startTime.Hour;
-        var isPeak = hour >= 17 && hour < 22;
-        return isPeak ? court.PeakPricePerHour : court.PricePerHour;
+        // No rule matched → base rate. Peak pricing is now expressed as a rule,
+        // so the old peak-window fallback is no longer needed.
+        return court.PricePerHour;
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
