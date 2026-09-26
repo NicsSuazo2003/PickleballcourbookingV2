@@ -23,6 +23,8 @@ public class Court
     public Guid ClientId { get; set; }
     public Client Client { get; set; } = null!;
     public List<PricingRule> PricingRules { get; set; } = new();
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
 
 
     [NotMapped]
