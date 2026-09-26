@@ -9,8 +9,13 @@ namespace PickleballBookingSystem.Services;
 public class CourtService : ICourtService
 {
     private readonly AppDbContext _db;
+    private readonly IPricingRuleService _pricingRuleService;
 
-    public CourtService(AppDbContext db) => _db = db;
+    public CourtService(AppDbContext db, IPricingRuleService pricingRuleService)
+    {
+        _db = db;
+        _pricingRuleService = pricingRuleService;
+    }
 
     // ========================================
     // ✅ MULTI-COURT METHODS (WITH CLIENT FILTER)
@@ -40,7 +45,7 @@ public class CourtService : ICourtService
             Type = request.Type,
             Indoor = request.Indoor,
             PricePerHour = request.PricePerHour,
-            PeakPricePerHour = request.PeakPricePerHour,  // ✅ ADDED
+            PeakPricePerHour = request.PeakPricePerHour,
             Amenities = request.Amenities ?? new List<string>(),
             OpenTime = TimeOnly.Parse(request.OpenTime),
             CloseTime = TimeOnly.Parse(request.CloseTime),
@@ -66,7 +71,7 @@ public class CourtService : ICourtService
         if (request.Indoor.HasValue) court.Indoor = request.Indoor.Value;
         if (request.PricePerHour.HasValue) court.PricePerHour = request.PricePerHour.Value;
         if (request.PeakPricePerHour.HasValue) court.PeakPricePerHour = request.PeakPricePerHour.Value;
-        if (request.Description is not null) court.Description = request.Description;  // ✅ ADD THIS
+        if (request.Description is not null) court.Description = request.Description;
         if (request.Amenities is not null) court.Amenities = request.Amenities;
         if (request.ImageUrl is not null) court.ImageUrl = request.ImageUrl;
         if (request.Images is not null) court.Images = request.Images;
@@ -79,6 +84,7 @@ public class CourtService : ICourtService
         await _db.SaveChangesAsync();
         return MapToDto(court);
     }
+
     public async Task DeleteCourtAsync(Guid id, Guid clientId)
     {
         var court = await _db.Courts
@@ -96,7 +102,9 @@ public class CourtService : ICourtService
     {
         date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
 
+        // ✅ Include PricingRules so the resolver can consult the new per-court rules
         var court = await _db.Courts
+            .Include(c => c.PricingRules)
             .FirstOrDefaultAsync(c => c.Id == courtId && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
 
@@ -104,7 +112,7 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
-        // ✅ Slots taken by regular bookings on THIS court
+        // Slots taken by regular bookings on THIS court
         var bookedTimes = await _db.TimeSlots
             .Where(s => s.Date.Date == date.Date && s.Booking.CourtId == courtId)
             .Join(_db.Bookings.Where(b =>
@@ -120,12 +128,7 @@ public class CourtService : ICourtService
             .Where(b => b.Date.Date == date.Date && (b.CourtId == null || b.CourtId == courtId) && b.ClientId == clientId)
             .ToListAsync();
 
-        var priceRules = await _db.PriceRules
-            .Where(r => r.IsActive && r.ClientId == clientId)
-            .OrderByDescending(r => r.Priority)
-            .ToListAsync();
-
-        // ✅ NEW — hours occupied by any active Open Play session using this court
+        // Hours occupied by any active Open Play session using this court
         var openPlayWindows = await _db.OpenPlaySessions
             .Where(s => s.IsActive
                      && s.ClientId == clientId
@@ -133,9 +136,6 @@ public class CourtService : ICourtService
                      && s.SessionCourts.Any(sc => sc.CourtId == courtId))
             .Select(s => new { s.StartTime, s.EndTime })
             .ToListAsync();
-
-        var dayOfWeek = date.DayOfWeek.ToString();
-        var isWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
 
         var bookedSet = bookedTimes.Select(t => $"{t.Hour:D2}:00").ToHashSet();
 
@@ -154,6 +154,7 @@ public class CourtService : ICourtService
 
         var phTime = DateTime.UtcNow.AddHours(8);
         var isToday = date.Date == phTime.Date;
+        var dateOnly = DateOnly.FromDateTime(date);
 
         var slots = new List<TimeSlotAvailabilityDto>();
 
@@ -167,22 +168,11 @@ public class CourtService : ICourtService
             var isBooked = bookedSet.Contains(startTime);
             var isBlocked = blockedSet.Contains(h);
 
-            // ✅ NEW — blocked by an active Open Play session window
             var isOpenPlayBlocked = openPlayWindows.Any(w =>
                 w.StartTime.Hour <= h && h < (w.EndTime.Hour == 0 ? 24 : w.EndTime.Hour));
 
-            var slotPrice = court.PricePerHour;
-            foreach (var rule in priceRules)
-            {
-                var dayMatch = rule.DayOfWeek == "All" || rule.DayOfWeek == dayOfWeek ||
-                               (rule.DayOfWeek == "Weekend" && isWeekend) ||
-                               (rule.DayOfWeek == "Weekday" && !isWeekend);
-                if (dayMatch && slotTime >= rule.StartTime && slotTime < rule.EndTime)
-                {
-                    slotPrice = rule.PricePerHour;
-                    break;
-                }
-            }
+            // ✅ Price resolved via per-court pricing rules (falls back to base rate)
+            var slotPrice = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, slotTime);
 
             slots.Add(new TimeSlotAvailabilityDto(
                 $"slot-{courtId}-{date:yyyy-MM-dd}-{h}",
@@ -275,7 +265,7 @@ public class CourtService : ICourtService
     }
 
     // ========================================
-    // ✅ PRICE RULES (CLIENT-SPECIFIC)
+    // ✅ PRICE RULES (CLIENT-SPECIFIC — legacy feature, unchanged)
     // ========================================
 
     public async Task<List<PriceRuleDto>> GetPriceRulesAsync(Guid clientId)
@@ -361,7 +351,7 @@ public class CourtService : ICourtService
         c.Type,
         c.Indoor,
         c.PricePerHour,
-        c.PeakPricePerHour,  // ✅ ADDED
+        c.PeakPricePerHour,
         c.Description,
         c.Amenities,
         c.Rating,
