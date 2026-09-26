@@ -25,6 +25,7 @@ public class CourtService : ICourtService
     {
         return await _db.Courts
             .Where(c => c.ClientId == clientId)
+            .OrderBy(c => c.CreatedAt)               // ✅ NEW — stable, creation-order sort
             .Select(c => MapToDto(c))
             .ToListAsync();
     }
@@ -54,6 +55,7 @@ public class CourtService : ICourtService
             Status = "active",
             Rating = 0,
             ClientId = clientId
+            // CreatedAt is set automatically by the property initializer
         };
         _db.Courts.Add(court);
         await _db.SaveChangesAsync();
