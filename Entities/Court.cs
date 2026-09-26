@@ -22,6 +22,8 @@ public class Court
     public string Surface { get; set; } = string.Empty;
     public Guid ClientId { get; set; }
     public Client Client { get; set; } = null!;
+    public List<PricingRule> PricingRules { get; set; } = new();
+
 
     [NotMapped]
     public List<string> Amenities

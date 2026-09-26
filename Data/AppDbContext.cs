@@ -18,6 +18,8 @@ public class AppDbContext : DbContext
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>();
     public DbSet<OpenPlaySessionCourt> OpenPlaySessionCourts => Set<OpenPlaySessionCourt>();  // ✅ NEW
+    public DbSet<PricingRule> PricingRules => Set<PricingRule>();
+
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -71,6 +73,14 @@ public class AppDbContext : DbContext
                 .WithOne(b => b.Client)
                 .HasForeignKey(b => b.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<PricingRule>(e =>
+        {
+            e.HasIndex(r => r.CourtId);
+            e.HasOne(r => r.Court)
+             .WithMany(c => c.PricingRules)
+             .HasForeignKey(r => r.CourtId)
+             .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ✅ Court - Booking relationship

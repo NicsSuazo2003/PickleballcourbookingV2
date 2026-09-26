@@ -15,19 +15,22 @@ public class AdminController : ControllerBase
     private readonly ICourtService _court;
     private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IPricingRuleService _pricingRuleService;
 
     public AdminController(
         IAdminService admin,
         IBookingService booking,
         ICourtService court,
         ClientResolver clientResolver,
-        IClientService clientService)
+        IClientService clientService,
+        IPricingRuleService pricingRuleService)
     {
         _admin = admin;
         _booking = booking;
         _court = court;
         _clientResolver = clientResolver;
         _clientService = clientService;
+        _pricingRuleService = pricingRuleService;
     }
 
     private async Task<Guid> GetClientId()
@@ -44,7 +47,7 @@ public class AdminController : ControllerBase
     // ========================================
 
     [HttpGet("bookings")]
-    [Authorize(Roles = "admin,staff")]  // ✅ Allow both roles
+    [Authorize(Roles = "admin,staff")]
     public async Task<ActionResult<List<BookingDto>>> GetBookings()
     {
         var clientId = await GetClientId();
@@ -53,13 +56,14 @@ public class AdminController : ControllerBase
     }
 
     [HttpPut("bookings/{id}")]
-    [Authorize(Roles = "admin,staff")]  // ✅ Allow both roles
+    [Authorize(Roles = "admin,staff")]
     public async Task<ActionResult<BookingDto>> UpdateBooking(Guid id, AdminUpdateBookingRequest request)
     {
         var clientId = await GetClientId();
         var booking = await _booking.AdminUpdateBookingAsync(id, request, clientId);
         return Ok(booking);
     }
+
     [HttpPost("bookings/manual")]
     [Authorize(Roles = "admin,staff")]
     public async Task<ActionResult<BookingDto>> CreateManualBooking(StaffCreateBookingRequest request)
@@ -74,7 +78,7 @@ public class AdminController : ControllerBase
     // ========================================
 
     [HttpGet("analytics")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<AnalyticsDto>> GetAnalytics()
     {
         var clientId = await GetClientId();
@@ -83,7 +87,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("analytics/courts")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<List<CourtAnalyticsDto>>> GetCourtAnalytics()
     {
         var clientId = await GetClientId();
@@ -92,7 +96,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("courts")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<List<CourtDto>>> GetCourts()
     {
         var clientId = await GetClientId();
@@ -101,7 +105,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("courts/{id}")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<CourtDto>> GetCourt(Guid id)
     {
         var clientId = await GetClientId();
@@ -110,7 +114,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpPost("courts")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<CourtDto>> CreateCourt(CreateCourtRequest request)
     {
         var clientId = await GetClientId();
@@ -119,7 +123,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpPut("courts/{id}")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<CourtDto>> UpdateCourt(Guid id, UpdateCourtRequest request)
     {
         var clientId = await GetClientId();
@@ -128,7 +132,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpDelete("courts/{id}")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> DeleteCourt(Guid id)
     {
         var clientId = await GetClientId();
@@ -137,7 +141,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpGet("settings")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<ClientDto>> GetSettings()
     {
         var subdomain = _clientResolver.GetSubdomain();
@@ -146,7 +150,7 @@ public class AdminController : ControllerBase
     }
 
     [HttpPut("settings")]
-    [Authorize(Roles = "admin")]  // ✅ Admin only
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<ClientDto>> UpdateSettings(UpdateClientSettingsRequest request)
     {
         var clientId = await GetClientId();
@@ -173,7 +177,10 @@ public class AdminController : ControllerBase
         var subdomain = _clientResolver.GetSubdomain();
         return Ok(new { subdomain, host = Request.Host.Host });
     }
-    // Controllers/AdminController.cs - Add these endpoints
+
+    // ========================================
+    // ✅ STAFF MANAGEMENT
+    // ========================================
 
     [HttpGet("staff")]
     [Authorize(Roles = "admin")]
@@ -209,5 +216,47 @@ public class AdminController : ControllerBase
         var clientId = await GetClientId();
         await _admin.DeleteStaffAsync(id, clientId);
         return Ok(new { message = "Staff removed" });
+    }
+
+    // ========================================
+    // ✅ PRICING RULES
+    // ========================================
+
+    [HttpGet("courts/{courtId}/pricing-rules")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<List<PricingRuleDto>>> GetPricingRules(Guid courtId)
+    {
+        var clientId = await GetClientId();
+        var rules = await _pricingRuleService.GetRulesAsync(courtId, clientId);
+        return Ok(rules);
+    }
+
+    [HttpPost("courts/{courtId}/pricing-rules")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<PricingRuleDto>> CreatePricingRule(
+        Guid courtId, CreatePricingRuleRequest request)
+    {
+        var clientId = await GetClientId();
+        var rule = await _pricingRuleService.CreateRuleAsync(courtId, clientId, request);
+        return Ok(rule);
+    }
+
+    [HttpPut("pricing-rules/{ruleId}")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<PricingRuleDto>> UpdatePricingRule(
+        Guid ruleId, UpdatePricingRuleRequest request)
+    {
+        var clientId = await GetClientId();
+        var rule = await _pricingRuleService.UpdateRuleAsync(ruleId, clientId, request);
+        return Ok(rule);
+    }
+
+    [HttpDelete("pricing-rules/{ruleId}")]
+    [Authorize(Roles = "admin")]
+    public async Task<IActionResult> DeletePricingRule(Guid ruleId)
+    {
+        var clientId = await GetClientId();
+        await _pricingRuleService.DeleteRuleAsync(ruleId, clientId);
+        return NoContent();
     }
 }

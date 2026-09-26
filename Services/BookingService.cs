@@ -4,17 +4,20 @@ using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
 using PickleballBookingSystem.Interfaces;
 
+
 namespace PickleballBookingSystem.Services;
 
 public class BookingService : IBookingService
 {
     private readonly AppDbContext _db;
     private readonly EmailService _email;
+    private readonly IPricingRuleService _pricingRuleService;
 
-    public BookingService(AppDbContext db, EmailService email)
+    public BookingService(AppDbContext db, EmailService email, IPricingRuleService pricingRuleService)
     {
         _db = db;
         _email = email;
+        _pricingRuleService = pricingRuleService;
     }
 
     public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
@@ -48,17 +51,18 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
 
             var conflicting = await _db.Bookings
-    .Where(b => b.CourtId == courtGuid
-        && b.Date == bookingDate
-        && b.Status != "cancelled"
-        && b.Status != "expired"
-        && b.Status != "rejected"      // ✅ NEW
-        && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
-    .SelectMany(b => b.Slots)
-    .Where(s => s.Date == bookingDate
-        && s.StartTime < endTime
-        && s.EndTime > startTime)
-    .AnyAsync();
+                .Where(b => b.CourtId == courtGuid
+                    && b.Date == bookingDate
+                    && b.Status != "cancelled"
+                    && b.Status != "expired"
+                    && b.Status != "rejected"      // ✅ NEW
+                    && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
+                .SelectMany(b => b.Slots)
+                .Where(s => s.Date == bookingDate
+                    && s.StartTime < endTime
+                    && s.EndTime > startTime)
+                .AnyAsync();
+
             if (conflicting)
                 throw new InvalidOperationException($"Time slot {slot.StartTime}-{slot.EndTime} is already booked");
         }
@@ -82,6 +86,33 @@ public class BookingService : IBookingService
         // Generate reference code
         var referenceCode = $"BK-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
 
+        // ─── Compute total using pricing rules (falls back to base/peak) ───
+        // Load the court once with its rules so we don't hit the DB per slot.
+        var courtWithRules = await _db.Courts
+            .Include(c => c.PricingRules)
+            .FirstAsync(c => c.Id == courtGuid);
+
+        var dateOnly = DateOnly.FromDateTime(bookingDate);
+
+        decimal computedTotal = 0m;
+        var slotPrices = new List<decimal>();
+
+        foreach (var slot in request.Slots)
+        {
+            if (!TimeOnly.TryParse(slot.StartTime, out var slotStart))
+                throw new InvalidOperationException($"Invalid start time: {slot.StartTime}");
+            if (!TimeOnly.TryParse(slot.EndTime, out var slotEnd))
+                throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
+
+            var hours = (decimal)(slotEnd - slotStart).TotalHours;
+            var ratePerHour = _pricingRuleService.ResolvePriceFromCourt(
+                courtWithRules, dateOnly, slotStart);
+
+            var slotPrice = Math.Round(ratePerHour * hours, 2);
+            slotPrices.Add(slotPrice);
+            computedTotal += slotPrice;
+        }
+
         var booking = new Booking
         {
             ClientId = clientId,
@@ -91,20 +122,22 @@ public class BookingService : IBookingService
             CustomerPhone = request.CustomerPhone?.Trim(),
             ReferenceCode = referenceCode,
             Date = bookingDate, // ✅ Already UTC
-            TotalAmount = request.TotalAmount,
+            TotalAmount = computedTotal,                     // ✅ computed from pricing rules
             Status = "pending_payment",
             PaymentMethod = "gcash",
             Notes = request.Notes?.Trim(),
             CreatedAt = DateTime.UtcNow,
             PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
-            Slots = request.Slots.Select(s => new TimeSlot
-            {
-                CourtId = courtGuid,
-                Date = bookingDate, // ✅ UTC
-                StartTime = TimeOnly.Parse(s.StartTime),
-                EndTime = TimeOnly.Parse(s.EndTime),
-                Price = request.TotalAmount / request.Slots.Count // Distribute total evenly
-            }).ToList()
+            Slots = request.Slots
+                .Select((s, index) => new TimeSlot
+                {
+                    CourtId = courtGuid,
+                    Date = bookingDate, // ✅ UTC
+                    StartTime = TimeOnly.Parse(s.StartTime),
+                    EndTime = TimeOnly.Parse(s.EndTime),
+                    Price = slotPrices[index]                // ✅ per-slot price from rules
+                })
+                .ToList()
         };
 
         _db.Bookings.Add(booking);
@@ -472,17 +505,17 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
 
             var conflicting = await _db.Bookings
-    .Where(b => b.CourtId == courtGuid
-        && b.Date == bookingDate
-        && b.Status != "cancelled"
-        && b.Status != "expired"
-        && b.Status != "rejected"      // ✅ NEW
-        && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
-    .SelectMany(b => b.Slots)
-    .Where(s => s.Date == bookingDate
-        && s.StartTime < endTime
-        && s.EndTime > startTime)
-    .AnyAsync();
+                .Where(b => b.CourtId == courtGuid
+                    && b.Date == bookingDate
+                    && b.Status != "cancelled"
+                    && b.Status != "expired"
+                    && b.Status != "rejected"      // ✅ NEW
+                    && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
+                .SelectMany(b => b.Slots)
+                .Where(s => s.Date == bookingDate
+                    && s.StartTime < endTime
+                    && s.EndTime > startTime)
+                .AnyAsync();
 
             if (conflicting)
                 throw new InvalidOperationException($"Time slot {slot.StartTime}-{slot.EndTime} is already booked");
@@ -523,7 +556,7 @@ public class BookingService : IBookingService
                 break;
         }
 
-        // ─── Calculate total (default: hourly rate × hours) ───────
+        // ─── Calculate total (default: per-slot price via pricing rules) ───
         decimal totalAmount;
         if (request.TotalAmount.HasValue && request.TotalAmount.Value >= 0)
         {
@@ -531,14 +564,24 @@ public class BookingService : IBookingService
         }
         else
         {
-            var totalMinutes = request.Slots.Sum(s =>
+            // Load pricing rules once for this court so we don't hit the DB per slot
+            var courtWithRules = await _db.Courts
+                .Include(c => c.PricingRules)
+                .FirstAsync(c => c.Id == courtGuid);
+
+            var dateOnly = DateOnly.FromDateTime(bookingDate);
+
+            decimal sum = 0m;
+            foreach (var slot in request.Slots)
             {
-                TimeOnly.TryParse(s.StartTime, out var st);
-                TimeOnly.TryParse(s.EndTime, out var en);
-                return (en - st).TotalMinutes;
-            });
-            var hours = (decimal)(totalMinutes / 60.0);
-            totalAmount = court.PricePerHour * hours;
+                if (!TimeOnly.TryParse(slot.StartTime, out var st)) continue;
+                if (!TimeOnly.TryParse(slot.EndTime, out var en)) continue;
+
+                var hours = (decimal)(en - st).TotalHours;
+                var ratePerHour = _pricingRuleService.ResolvePriceFromCourt(courtWithRules, dateOnly, st);
+                sum += ratePerHour * hours;
+            }
+            totalAmount = sum;
         }
 
         // ─── Build booking ────────────────────────────────────────
