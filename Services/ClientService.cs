@@ -1,7 +1,7 @@
-// Services/ClientService.cs
 using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
+using PickleballBookingSystem.Entities;
 using PickleballBookingSystem.Interfaces;
 using System.Text.Json;
 
@@ -19,20 +19,7 @@ public class ClientService : IClientService
             .FirstOrDefaultAsync(c => c.Subdomain == subdomain && c.Status == "active")
             ?? throw new KeyNotFoundException($"Client with subdomain '{subdomain}' not found");
 
-        return new ClientDto(
-            client.Id.ToString(),
-            client.Name,
-            client.Subdomain,
-            client.LogoUrl,
-            client.PrimaryColor,
-            client.AccentColor,
-            client.GcashNumber,
-            client.GcashAccountName,
-            !string.IsNullOrEmpty(client.PaymentMethods)
-                ? JsonSerializer.Deserialize<object>(client.PaymentMethods)
-                : null,
-            client.AvailableAmenities
-        );
+        return MapToDto(client);
     }
 
     public async Task<Guid> GetClientIdBySubdomainAsync(string subdomain)
@@ -44,7 +31,8 @@ public class ClientService : IClientService
         return client.Id;
     }
 
-    public async Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request)
+    public async Task<ClientDto> UpdateClientSettingsAsync(
+        Guid clientId, UpdateClientSettingsRequest request)
     {
         var client = await _db.Clients.FindAsync(clientId)
             ?? throw new KeyNotFoundException("Client not found");
@@ -58,14 +46,23 @@ public class ClientService : IClientService
             client.PaymentMethods = JsonSerializer.Serialize(request.PaymentMethods);
         }
 
-        // ⭐ NEW — cascade: strip removed amenities from every court of this client
+        // ⭐ Cascade: strip removed amenities from every court of this client
         if (request.AvailableAmenities is not null)
         {
             var oldList = client.AvailableAmenities;
-            var newList = request.AvailableAmenities;
+            var newList = request.AvailableAmenities
+                .Select(a => new AmenityItem
+                {
+                    Name = a.Name,
+                    Icon = string.IsNullOrWhiteSpace(a.Icon) ? "Sparkles" : a.Icon,
+                    Description = a.Description,
+                })
+                .ToList();
 
+            var newNames = newList.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var removed = oldList
-                .Except(newList, StringComparer.OrdinalIgnoreCase)
+                .Select(a => a.Name)
+                .Where(n => !newNames.Contains(n))
                 .ToList();
 
             if (removed.Count > 0)
@@ -88,17 +85,21 @@ public class ClientService : IClientService
 
                     if (filtered.Count != current.Count)
                     {
-                        // Direct write — doesn't rely on [NotMapped] setter being tracked
                         court.AmenitiesRaw = string.Join(',', filtered);
                     }
                 }
             }
 
-            client.AvailableAmenitiesRaw = string.Join(',', newList);
+            client.AvailableAmenities = newList;
         }
 
         await _db.SaveChangesAsync();
+        return MapToDto(client);
+    }
 
+    // ⭐ Single mapping method — used by both read and write paths
+    private static ClientDto MapToDto(Client client)
+    {
         return new ClientDto(
             client.Id.ToString(),
             client.Name,
@@ -112,6 +113,8 @@ public class ClientService : IClientService
                 ? JsonSerializer.Deserialize<object>(client.PaymentMethods)
                 : null,
             client.AvailableAmenities
+                .Select(a => new AmenityItemDto(a.Name, a.Icon, a.Description))
+                .ToList()
         );
     }
 }
