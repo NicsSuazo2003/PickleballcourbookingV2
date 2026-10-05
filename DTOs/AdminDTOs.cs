@@ -59,5 +59,5 @@ public record UpdateClientSettingsRequest(
     string? GcashNumber,
     string? GcashAccountName,
     object? PaymentMethods,
-    List<string>? AvailableAmenities  // ⭐ NEW
+    List<AmenityItemDto>? AvailableAmenities  
 );
