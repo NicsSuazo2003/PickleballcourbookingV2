@@ -96,31 +96,58 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// ✅ FIX: Make this async properly
-using (var scope = app.Services.CreateScope())
+// ─────────────────────────────────────────────────────────────────
+// Background startup tasks
+// Run seeding + maintenance off the critical path so Kestrel binds
+// the port immediately. Render's health check will pass in ~2s.
+// ─────────────────────────────────────────────────────────────────
+_ = Task.Run(async () =>
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    DbSeeder.Initialize(db);
+    // Give Kestrel a moment to bind the port first
+    await Task.Delay(TimeSpan.FromSeconds(5));
 
-    var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
-    Guid clientId;
     try
     {
-        clientId = await clientService.GetClientIdBySubdomainAsync("picklejoe");
-    }
-    catch
-    {
-        var firstClient = await db.Clients.FirstOrDefaultAsync();
-        clientId = firstClient?.Id ?? Guid.Empty;
-    }
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    if (clientId != Guid.Empty)
-    {
-        var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
-        await bookingService.AutoCompletePastBookingsAsync(clientId);
-        await bookingService.CancelExpiredPaymentsAsync(clientId);
+        logger.LogInformation("[startup] Running DbSeeder...");
+        DbSeeder.Initialize(db);
+        logger.LogInformation("[startup] DbSeeder done.");
+
+        var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
+        Guid clientId;
+        try
+        {
+            clientId = await clientService.GetClientIdBySubdomainAsync("picklejoe");
+        }
+        catch
+        {
+            var firstClient = await db.Clients.FirstOrDefaultAsync();
+            clientId = firstClient?.Id ?? Guid.Empty;
+        }
+
+        if (clientId != Guid.Empty)
+        {
+            var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
+
+            logger.LogInformation("[startup] AutoCompletePastBookings for {ClientId}...", clientId);
+            await bookingService.AutoCompletePastBookingsAsync(clientId);
+
+            logger.LogInformation("[startup] CancelExpiredPayments for {ClientId}...", clientId);
+            await bookingService.CancelExpiredPaymentsAsync(clientId);
+
+            logger.LogInformation("[startup] Maintenance done.");
+        }
     }
-}
+    catch (Exception ex)
+    {
+        // Don't crash the app if background startup work fails.
+        var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+        loggerFactory.CreateLogger("Startup").LogError(ex, "[startup] Background task failed");
+    }
+});
 
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseCors("Frontend");
