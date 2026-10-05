@@ -63,9 +63,9 @@ public class AppDbContext : DbContext
                 .HasColumnType("jsonb");
 
 
-            e.Property(c => c.AvailableAmenitiesRaw)
-       .HasColumnName("available_amenities")
-       .HasColumnType("text");
+            e.Property(c => c.AvailableAmenitiesJson)
+    .HasColumnName("available_amenities_json")
+    .HasColumnType("jsonb");
 
 
             e.Property(c => c.CreatedAt).HasColumnName("created_at");
