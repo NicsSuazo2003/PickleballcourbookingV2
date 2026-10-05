@@ -7,7 +7,7 @@ public static class DbSeeder
 {
     public static void Initialize(AppDbContext db)
     {
-        // ✅ First, seed the client
+        // Seed the initial client + courts + admin user only if there's nothing yet.
         if (!db.Clients.Any())
         {
             var client = new Client
@@ -22,29 +22,15 @@ public static class DbSeeder
                 GcashAccountName = "PickleJoe Courts",
                 CreatedAt = DateTime.UtcNow,
                 Status = "active",
-                // ⭐ NEW — comma-separated default amenities
-                AvailableAmenitiesRaw = string.Join(',', new[]
-                {
-                    "Indoor",
-                    "Outdoor",
-                    "Lighted",
-                    "Air Conditioned",
-                    "Parking",
-                    "Showers",
-                    "Pro Shop",
-                    "Water Station",
-                    "Spectator Seating",
-                    "WiFi",
-                })
+                // Amenities start empty — admin adds them via Settings.
+                AvailableAmenitiesJson = null,
             };
 
             db.Clients.Add(client);
             db.SaveChanges();
 
-            // Get the client ID to associate with courts
             var clientId = client.Id;
 
-            // Seed Courts with the client ID
             if (!db.Courts.Any())
             {
                 var courts = new List<Court>
@@ -67,7 +53,7 @@ public static class DbSeeder
                         OpenTime = new TimeOnly(8, 0),
                         CloseTime = new TimeOnly(22, 0),
                         Dimensions = "44ft x 20ft",
-                        Surface = "Cushion"
+                        Surface = "Cushion",
                     },
                     new Court
                     {
@@ -87,7 +73,7 @@ public static class DbSeeder
                         OpenTime = new TimeOnly(8, 0),
                         CloseTime = new TimeOnly(20, 0),
                         Dimensions = "44ft x 20ft",
-                        Surface = "Hardcourt"
+                        Surface = "Hardcourt",
                     },
                     new Court
                     {
@@ -107,15 +93,14 @@ public static class DbSeeder
                         OpenTime = new TimeOnly(8, 0),
                         CloseTime = new TimeOnly(22, 0),
                         Dimensions = "44ft x 20ft",
-                        Surface = "Premium Cushion"
-                    }
+                        Surface = "Premium Cushion",
+                    },
                 };
 
                 db.Courts.AddRange(courts);
                 db.SaveChanges();
             }
 
-            // Seed admin user if empty
             if (!db.Users.Any())
             {
                 var admin = new User
@@ -126,40 +111,12 @@ public static class DbSeeder
                     Name = "Admin User",
                     Role = "admin",
                     Status = "active",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
                 };
 
                 db.Users.Add(admin);
                 db.SaveChanges();
             }
-        }
-
-        // ⭐ NEW — backfill amenities for existing clients that don't have any
-        var clientsWithoutAmenities = db.Clients
-            .Where(c => string.IsNullOrEmpty(c.AvailableAmenitiesRaw))
-            .ToList();
-
-        if (clientsWithoutAmenities.Any())
-        {
-            var defaults = string.Join(',', new[]
-            {
-                "Indoor",
-                "Outdoor",
-                "Lighted",
-                "Air Conditioned",
-                "Parking",
-                "Showers",
-                "Pro Shop",
-                "Water Station",
-                "Spectator Seating",
-                "WiFi",
-            });
-
-            foreach (var c in clientsWithoutAmenities)
-            {
-                c.AvailableAmenitiesRaw = defaults;
-            }
-            db.SaveChanges();
         }
     }
 }
