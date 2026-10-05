@@ -6,10 +6,9 @@ public interface IClientService
 {
     Task<ClientDto> GetClientBySubdomainAsync(string subdomain);
     Task<Guid> GetClientIdBySubdomainAsync(string subdomain);
-    Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request); // ✅ NEW
+    Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request);
 }
 
-// ✅ Add PaymentMethods to ClientDto
 public record ClientDto(
     string Id,
     string Name,
@@ -19,5 +18,6 @@ public record ClientDto(
     string AccentColor,
     string? GcashNumber,
     string? GcashAccountName,
-    object? PaymentMethods = null // ✅ ADD THIS
+    object? PaymentMethods,
+    List<string> AvailableAmenities
 );

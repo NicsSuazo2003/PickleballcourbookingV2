@@ -1,4 +1,3 @@
-// Entities/Client.cs
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PickleballBookingSystem.Entities;
@@ -17,7 +16,17 @@ public class Client
     [Column(TypeName = "jsonb")]
     public string? PaymentMethods { get; set; }
 
-    // ✅ FIX: Ensure CreatedAt is always UTC
+    // ⭐ NEW — comma-separated, mirrors Court.AmenitiesRaw
+    public string AvailableAmenitiesRaw { get; set; } = string.Empty;
+
+    // ⭐ NEW — same accessor pattern as Court.Amenities
+    [NotMapped]
+    public List<string> AvailableAmenities
+    {
+        get => AvailableAmenitiesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+        set => AvailableAmenitiesRaw = string.Join(',', value);
+    }
+
     private DateTime _createdAt;
     public DateTime CreatedAt
     {

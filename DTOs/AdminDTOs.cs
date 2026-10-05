@@ -26,7 +26,7 @@ public record CourtAnalyticsDto(
     int PendingBookings,
     double UtilizationRate
 );
-// DTOs/AdminDTOs.cs
+
 public record CreateStaffRequest(
     string Name,
     string Email,
@@ -38,7 +38,6 @@ public record UpdateStaffStatusRequest(
     string Status  // "active" or "suspended"
 );
 
-// Add this to UserDto if not already present
 public record UserDto(
     string Id,
     string Name,
@@ -54,9 +53,11 @@ public record UserDto(
 public record RevenueByDayDto(string Date, decimal Revenue);
 public record BookingsByDayDto(string Date, int Bookings);
 public record AdminUpdateUserRequest(string? Name, string? Email, string? Role, string? Status);
+
 public record UpdateClientSettingsRequest(
     string? Name,
     string? GcashNumber,
     string? GcashAccountName,
-    object? PaymentMethods // ✅ Add this
+    object? PaymentMethods,
+    List<string>? AvailableAmenities  // ⭐ NEW
 );

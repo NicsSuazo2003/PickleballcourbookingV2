@@ -28,10 +28,10 @@ public class ClientService : IClientService
             client.AccentColor,
             client.GcashNumber,
             client.GcashAccountName,
-            // ✅ Parse and return PaymentMethods
             !string.IsNullOrEmpty(client.PaymentMethods)
                 ? JsonSerializer.Deserialize<object>(client.PaymentMethods)
-                : null
+                : null,
+            client.AvailableAmenities
         );
     }
 
@@ -53,10 +53,48 @@ public class ClientService : IClientService
         if (request.GcashNumber is not null) client.GcashNumber = request.GcashNumber;
         if (request.GcashAccountName is not null) client.GcashAccountName = request.GcashAccountName;
 
-        // ✅ Save payment methods as JSON string (EF will handle jsonb conversion)
         if (request.PaymentMethods is not null)
         {
             client.PaymentMethods = JsonSerializer.Serialize(request.PaymentMethods);
+        }
+
+        // ⭐ NEW — cascade: strip removed amenities from every court of this client
+        if (request.AvailableAmenities is not null)
+        {
+            var oldList = client.AvailableAmenities;
+            var newList = request.AvailableAmenities;
+
+            var removed = oldList
+                .Except(newList, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (removed.Count > 0)
+            {
+                var courts = await _db.Courts
+                    .Where(c => c.ClientId == clientId)
+                    .ToListAsync();
+
+                foreach (var court in courts)
+                {
+                    if (string.IsNullOrEmpty(court.AmenitiesRaw)) continue;
+
+                    var current = court.AmenitiesRaw
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .ToList();
+
+                    var filtered = current
+                        .Where(a => !removed.Contains(a, StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+
+                    if (filtered.Count != current.Count)
+                    {
+                        // Direct write — doesn't rely on [NotMapped] setter being tracked
+                        court.AmenitiesRaw = string.Join(',', filtered);
+                    }
+                }
+            }
+
+            client.AvailableAmenitiesRaw = string.Join(',', newList);
         }
 
         await _db.SaveChangesAsync();
@@ -70,10 +108,10 @@ public class ClientService : IClientService
             client.AccentColor,
             client.GcashNumber,
             client.GcashAccountName,
-            // ✅ Return updated PaymentMethods
             !string.IsNullOrEmpty(client.PaymentMethods)
                 ? JsonSerializer.Deserialize<object>(client.PaymentMethods)
-                : null
+                : null,
+            client.AvailableAmenities
         );
     }
 }

@@ -14,14 +14,28 @@ public static class DbSeeder
             {
                 Id = Guid.NewGuid(),
                 Name = "PickleJoe",
-                Subdomain = "picklejoe", // Matches your frontend's x-client-subdomain
+                Subdomain = "picklejoe",
                 LogoUrl = null,
                 PrimaryColor = "#1A2E1A",
                 AccentColor = "#C9A94E",
                 GcashNumber = "0917 234 5678",
                 GcashAccountName = "PickleJoe Courts",
                 CreatedAt = DateTime.UtcNow,
-                Status = "active"
+                Status = "active",
+                // ⭐ NEW — comma-separated default amenities
+                AvailableAmenitiesRaw = string.Join(',', new[]
+                {
+                    "Indoor",
+                    "Outdoor",
+                    "Lighted",
+                    "Air Conditioned",
+                    "Parking",
+                    "Showers",
+                    "Pro Shop",
+                    "Water Station",
+                    "Spectator Seating",
+                    "WiFi",
+                })
             };
 
             db.Clients.Add(client);
@@ -46,8 +60,8 @@ public static class DbSeeder
                         PeakPricePerHour = 450,
                         Description = "Premium indoor court with professional-grade flooring",
                         ImageUrl = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48",
-                        Images = new List<string> { "https://images.unsplash.com/photo-1534438327276-14e5300c3a48" },
-                        Amenities = new List<string> { "WiFi", "Air Conditioning", "Lighting", "Showers" },
+                        ImagesRaw = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48",
+                        AmenitiesRaw = "WiFi,Air Conditioning,Lighting,Showers",
                         Rating = 4.8,
                         Status = "active",
                         OpenTime = new TimeOnly(8, 0),
@@ -66,8 +80,8 @@ public static class DbSeeder
                         PeakPricePerHour = 380,
                         Description = "Open-air court surrounded by greenery",
                         ImageUrl = "https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67",
-                        Images = new List<string> { "https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67" },
-                        Amenities = new List<string> { "WiFi", "Lighting", "Parking" },
+                        ImagesRaw = "https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67",
+                        AmenitiesRaw = "WiFi,Lighting,Parking",
                         Rating = 4.5,
                         Status = "active",
                         OpenTime = new TimeOnly(8, 0),
@@ -86,8 +100,8 @@ public static class DbSeeder
                         PeakPricePerHour = 650,
                         Description = "Flagship court with stadium seating",
                         ImageUrl = "https://images.unsplash.com/photo-1554068865-24cecd4e34b8",
-                        Images = new List<string> { "https://images.unsplash.com/photo-1554068865-24cecd4e34b8" },
-                        Amenities = new List<string> { "WiFi", "Air Conditioning", "Lighting", "Showers", "Pro Shop" },
+                        ImagesRaw = "https://images.unsplash.com/photo-1554068865-24cecd4e34b8",
+                        AmenitiesRaw = "WiFi,Air Conditioning,Lighting,Showers,Pro Shop",
                         Rating = 4.9,
                         Status = "active",
                         OpenTime = new TimeOnly(8, 0),
@@ -118,6 +132,34 @@ public static class DbSeeder
                 db.Users.Add(admin);
                 db.SaveChanges();
             }
+        }
+
+        // ⭐ NEW — backfill amenities for existing clients that don't have any
+        var clientsWithoutAmenities = db.Clients
+            .Where(c => string.IsNullOrEmpty(c.AvailableAmenitiesRaw))
+            .ToList();
+
+        if (clientsWithoutAmenities.Any())
+        {
+            var defaults = string.Join(',', new[]
+            {
+                "Indoor",
+                "Outdoor",
+                "Lighted",
+                "Air Conditioned",
+                "Parking",
+                "Showers",
+                "Pro Shop",
+                "Water Station",
+                "Spectator Seating",
+                "WiFi",
+            });
+
+            foreach (var c in clientsWithoutAmenities)
+            {
+                c.AvailableAmenitiesRaw = defaults;
+            }
+            db.SaveChanges();
         }
     }
 }

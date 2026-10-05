@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using PickleballBookingSystem.Data;
@@ -11,9 +12,11 @@ using PickleballBookingSystem.Data;
 namespace PickleballBookingSystem.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260915234643_AddTitleToOpenPlaySessions")]
+    partial class AddTitleToOpenPlaySessions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -158,11 +161,6 @@ namespace PickleballBookingSystem.Migrations
                         .HasColumnType("text")
                         .HasColumnName("accent_color");
 
-                    b.Property<string>("AvailableAmenitiesRaw")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("available_amenities");
-
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -226,11 +224,6 @@ namespace PickleballBookingSystem.Migrations
 
                     b.Property<TimeOnly>("CloseTime")
                         .HasColumnType("time without time zone");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("NOW() AT TIME ZONE 'UTC'");
 
                     b.Property<string>("Description")
                         .HasColumnType("text");
@@ -385,8 +378,7 @@ namespace PickleballBookingSystem.Migrations
                         .HasColumnName("StartTime");
 
                     b.Property<string>("Title")
-                        .HasColumnType("text")
-                        .HasColumnName("Title");
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -395,36 +387,6 @@ namespace PickleballBookingSystem.Migrations
                     b.HasIndex("CourtId");
 
                     b.ToTable("openplaysessions");
-                });
-
-            modelBuilder.Entity("PickleballBookingSystem.Entities.OpenPlaySessionCourt", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CourtId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("CourtId");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("CreatedAt")
-                        .HasDefaultValueSql("NOW() AT TIME ZONE 'UTC'");
-
-                    b.Property<Guid>("OpenPlaySessionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("OpenPlaySessionId");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CourtId");
-
-                    b.HasIndex("OpenPlaySessionId", "CourtId")
-                        .IsUnique();
-
-                    b.ToTable("openplaysessioncourts");
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.PriceRule", b =>
@@ -465,54 +427,6 @@ namespace PickleballBookingSystem.Migrations
                     b.HasIndex("ClientId");
 
                     b.ToTable("pricerules");
-                });
-
-            modelBuilder.Entity("PickleballBookingSystem.Entities.PricingRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CourtId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("NOW() AT TIME ZONE 'UTC'");
-
-                    b.Property<string>("Days")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<TimeOnly>("EndTime")
-                        .HasColumnType("time without time zone");
-
-                    b.Property<string>("Label")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<decimal>("PricePerHour")
-                        .HasColumnType("decimal(10,2)");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
-
-                    b.Property<TimeOnly>("StartTime")
-                        .HasColumnType("time without time zone");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("NOW() AT TIME ZONE 'UTC'");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CourtId");
-
-                    b.ToTable("pricingrules");
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.TimeSlot", b =>
@@ -694,25 +608,6 @@ namespace PickleballBookingSystem.Migrations
                     b.Navigation("Court");
                 });
 
-            modelBuilder.Entity("PickleballBookingSystem.Entities.OpenPlaySessionCourt", b =>
-                {
-                    b.HasOne("PickleballBookingSystem.Entities.Court", "Court")
-                        .WithMany()
-                        .HasForeignKey("CourtId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PickleballBookingSystem.Entities.OpenPlaySession", "OpenPlaySession")
-                        .WithMany("SessionCourts")
-                        .HasForeignKey("OpenPlaySessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Court");
-
-                    b.Navigation("OpenPlaySession");
-                });
-
             modelBuilder.Entity("PickleballBookingSystem.Entities.PriceRule", b =>
                 {
                     b.HasOne("PickleballBookingSystem.Entities.Client", "Client")
@@ -722,17 +617,6 @@ namespace PickleballBookingSystem.Migrations
                         .IsRequired();
 
                     b.Navigation("Client");
-                });
-
-            modelBuilder.Entity("PickleballBookingSystem.Entities.PricingRule", b =>
-                {
-                    b.HasOne("PickleballBookingSystem.Entities.Court", "Court")
-                        .WithMany("PricingRules")
-                        .HasForeignKey("CourtId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Court");
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.TimeSlot", b =>
@@ -782,16 +666,12 @@ namespace PickleballBookingSystem.Migrations
 
                     b.Navigation("Bookings");
 
-                    b.Navigation("PricingRules");
-
                     b.Navigation("TimeSlots");
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.OpenPlaySession", b =>
                 {
                     b.Navigation("Bookings");
-
-                    b.Navigation("SessionCourts");
                 });
 
             modelBuilder.Entity("PickleballBookingSystem.Entities.User", b =>
