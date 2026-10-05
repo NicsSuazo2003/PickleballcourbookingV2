@@ -30,6 +30,8 @@ public class EmailService
     private const string SUCCESS = "#2ECC71";  // success
     private const string PURPLE = "#A78BFA";  // refund (no tailwind equivalent)
 
+    // ⭐ Hardcoded admin panel URL for the admin CTA button
+    private const string ADMIN_URL = "https://centercourt-booking.vercel.app/admin";
 
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
     {
@@ -197,7 +199,6 @@ public class EmailService
             var senderEmail = _config["Brevo:SenderEmail"];
             var senderName = _config["Brevo:SenderName"];
             var adminEmail = _config["Brevo:AdminEmail"];
-            var frontendUrl = _config["App:FrontendUrl"];
 
             var prettyDate = FormatDate(date);
             var prettyTime = FormatTimeRange(time);
@@ -214,7 +215,7 @@ public class EmailService
                 {KvRow("Amount", amount, isLast: true)}
               </table>
 
-              {CtaButton($"{frontendUrl}/admin/bookings", "Review in Admin Panel")}
+              {CtaButton(ADMIN_URL, "Review in Admin Panel")}
             ";
 
             var html = WrapLayout("New Booking", content);
