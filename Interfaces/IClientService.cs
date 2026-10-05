@@ -19,5 +19,5 @@ public record ClientDto(
     string? GcashNumber,
     string? GcashAccountName,
     object? PaymentMethods,
-    List<string> AvailableAmenities
+    List<AmenityItemDto> AvailableAmenities  // ← new
 );
