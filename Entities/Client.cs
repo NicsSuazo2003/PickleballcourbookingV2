@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json;
 
 namespace PickleballBookingSystem.Entities;
 
@@ -16,15 +17,18 @@ public class Client
     [Column(TypeName = "jsonb")]
     public string? PaymentMethods { get; set; }
 
-    // ⭐ NEW — comma-separated, mirrors Court.AmenitiesRaw
-    public string AvailableAmenitiesRaw { get; set; } = string.Empty;
+    // ⭐ NEW — JSONB column. Stores [{ name, icon, description }, ...]
+    [Column(TypeName = "jsonb")]
+    public string? AvailableAmenitiesJson { get; set; }
 
-    // ⭐ NEW — same accessor pattern as Court.Amenities
     [NotMapped]
-    public List<string> AvailableAmenities
+    public List<AmenityItem> AvailableAmenities
     {
-        get => AvailableAmenitiesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
-        set => AvailableAmenitiesRaw = string.Join(',', value);
+        get => string.IsNullOrEmpty(AvailableAmenitiesJson)
+            ? new List<AmenityItem>()
+            : JsonSerializer.Deserialize<List<AmenityItem>>(AvailableAmenitiesJson)
+              ?? new List<AmenityItem>();
+        set => AvailableAmenitiesJson = JsonSerializer.Serialize(value);
     }
 
     private DateTime _createdAt;
@@ -38,4 +42,12 @@ public class Client
 
     public ICollection<Court> Courts { get; set; } = new List<Court>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
+}
+
+// ⭐ NEW — nested amenity shape
+public class AmenityItem
+{
+    public string Name { get; set; } = string.Empty;
+    public string Icon { get; set; } = "Sparkles";  // Lucide icon key
+    public string? Description { get; set; }        // Landing-only subtitle
 }
