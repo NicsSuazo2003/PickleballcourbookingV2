@@ -19,5 +19,6 @@ public record ClientDto(
     string? GcashNumber,
     string? GcashAccountName,
     object? PaymentMethods,
-    List<AmenityItemDto> AvailableAmenities  // ← new
+    List<AmenityItemDto> AvailableAmenities,
+    int MaxAdvanceBookingDays   // ⭐ NEW
 );

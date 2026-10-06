@@ -17,7 +17,7 @@ public class Client
     [Column(TypeName = "jsonb")]
     public string? PaymentMethods { get; set; }
 
-    // ⭐ NEW — JSONB column. Stores [{ name, icon, description }, ...]
+    // ⭐ JSONB column. Stores [{ name, icon, description }, ...]
     [Column(TypeName = "jsonb")]
     public string? AvailableAmenitiesJson { get; set; }
 
@@ -30,6 +30,10 @@ public class Client
               ?? new List<AmenityItem>();
         set => AvailableAmenitiesJson = JsonSerializer.Serialize(value);
     }
+
+    // ⭐ NEW — Maximum days ahead a customer can book.
+    // 0 = no limit. Default = 90 days (~3 months).
+    public int MaxAdvanceBookingDays { get; set; } = 90;
 
     private DateTime _createdAt;
     public DateTime CreatedAt
@@ -44,7 +48,7 @@ public class Client
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
 }
 
-// ⭐ NEW — nested amenity shape
+// Nested amenity shape (stored in AvailableAmenitiesJson)
 public class AmenityItem
 {
     public string Name { get; set; } = string.Empty;

@@ -4,7 +4,6 @@ using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
 using PickleballBookingSystem.Interfaces;
 
-
 namespace PickleballBookingSystem.Services;
 
 public class BookingService : IBookingService
@@ -18,6 +17,24 @@ public class BookingService : IBookingService
         _db = db;
         _email = email;
         _pricingRuleService = pricingRuleService;
+    }
+
+    // ⭐ NEW — validates the requested booking date against the client's
+    // max advance booking window. 0 = no limit.
+    private async Task EnsureWithinAdvanceWindowAsync(Guid clientId, DateTime bookingDate)
+    {
+        var client = await _db.Clients.FindAsync(clientId);
+        if (client is null) return; // client lookup fails elsewhere with a clearer error
+
+        if (client.MaxAdvanceBookingDays > 0)
+        {
+            var maxDate = DateTime.UtcNow.Date.AddDays(client.MaxAdvanceBookingDays);
+            if (bookingDate.Date > maxDate)
+            {
+                throw new InvalidOperationException(
+                    $"Bookings can only be made up to {client.MaxAdvanceBookingDays} days in advance.");
+            }
+        }
     }
 
     public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
@@ -38,6 +55,9 @@ public class BookingService : IBookingService
         // ✅ Ensure date is UTC to avoid PostgreSQL timestamp issue
         bookingDate = DateTime.SpecifyKind(bookingDate.Date, DateTimeKind.Utc);
 
+        // ⭐ NEW — enforce max advance booking window (customer bookings)
+        await EnsureWithinAdvanceWindowAsync(clientId, bookingDate);
+
         // Validate time slots
         if (request.Slots == null || !request.Slots.Any())
             throw new InvalidOperationException("At least one time slot is required");
@@ -55,8 +75,8 @@ public class BookingService : IBookingService
                     && b.Date == bookingDate
                     && b.Status != "cancelled"
                     && b.Status != "expired"
-                    && b.Status != "rejected"      // ✅ NEW
-                    && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
+                    && b.Status != "rejected"
+                    && b.Status != "refunded")
                 .SelectMany(b => b.Slots)
                 .Where(s => s.Date == bookingDate
                     && s.StartTime < endTime
@@ -87,7 +107,6 @@ public class BookingService : IBookingService
         var referenceCode = $"BK-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
 
         // ─── Compute total using pricing rules (falls back to base/peak) ───
-        // Load the court once with its rules so we don't hit the DB per slot.
         var courtWithRules = await _db.Courts
             .Include(c => c.PricingRules)
             .FirstAsync(c => c.Id == courtGuid);
@@ -121,8 +140,8 @@ public class BookingService : IBookingService
             CustomerEmail = request.CustomerEmail.Trim().ToLower(),
             CustomerPhone = request.CustomerPhone?.Trim(),
             ReferenceCode = referenceCode,
-            Date = bookingDate, // ✅ Already UTC
-            TotalAmount = computedTotal,                     // ✅ computed from pricing rules
+            Date = bookingDate,
+            TotalAmount = computedTotal,
             Status = "pending_payment",
             PaymentMethod = "gcash",
             Notes = request.Notes?.Trim(),
@@ -132,10 +151,10 @@ public class BookingService : IBookingService
                 .Select((s, index) => new TimeSlot
                 {
                     CourtId = courtGuid,
-                    Date = bookingDate, // ✅ UTC
+                    Date = bookingDate,
                     StartTime = TimeOnly.Parse(s.StartTime),
                     EndTime = TimeOnly.Parse(s.EndTime),
-                    Price = slotPrices[index]                // ✅ per-slot price from rules
+                    Price = slotPrices[index]
                 })
                 .ToList()
         };
@@ -282,10 +301,6 @@ public class BookingService : IBookingService
         return MapToDto(booking, booking.Court?.Name ?? "");
     }
 
-    // ✅ FIXED: screenshotUrl is now nullable — a payment can be submitted
-    // with just a reference number and no screenshot. We only overwrite
-    // PaymentScreenshot when an actual URL was passed in, so an existing
-    // screenshot from a retry never gets wiped out by a null on a later call.
     public async Task<BookingDto> UploadPaymentScreenshotAsync(
      Guid id,
      string? screenshotUrl,
@@ -307,7 +322,6 @@ public class BookingService : IBookingService
 
         booking.PaymentReference = paymentReference;
 
-        // ✅ Save the selected method name (from the frontend)
         if (!string.IsNullOrWhiteSpace(paymentMethod))
             booking.PaymentMethod = paymentMethod;
 
@@ -349,8 +363,8 @@ public class BookingService : IBookingService
                 && b.Status != "completed"
                 && b.Status != "cancelled"
                 && b.Status != "rejected"
-                && b.Status != "refunded"      // ✅ NEW — refunded stays refunded
-                && b.Status != "expired")       // ✅ NEW — expired stays expired
+                && b.Status != "refunded"
+                && b.Status != "expired")
             .ToListAsync();
 
         foreach (var booking in pastBookings)
@@ -380,8 +394,6 @@ public class BookingService : IBookingService
 
     private async Task SendStatusChangeEmailAsync(Booking booking, string previousStatus)
     {
-        // Only fire when the status actually changed, so re-saving the same
-        // status (e.g. an admin re-submitting the same form) doesn't spam the customer.
         if (previousStatus == booking.Status)
             return;
 
@@ -389,7 +401,7 @@ public class BookingService : IBookingService
             .OrderBy(s => s.StartTime)
             .Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"));
         var dateStr = booking.Date.ToString("yyyy-MM-dd");
-        var amountStr = $"₱{booking.TotalAmount:N2}";   // ✅ NEW: formatted once
+        var amountStr = $"₱{booking.TotalAmount:N2}";
 
         try
         {
@@ -401,7 +413,7 @@ public class BookingService : IBookingService
                     booking.ReferenceCode,
                     dateStr,
                     timeRange,
-                    amountStr                          // ✅ NEW
+                    amountStr
                 );
             }
             else if (booking.Status == "rejected")
@@ -412,8 +424,8 @@ public class BookingService : IBookingService
                     booking.ReferenceCode,
                     dateStr,
                     timeRange,
-                    null,                              // reason
-                    amountStr                          // ✅ NEW
+                    null,
+                    amountStr
                 );
             }
             else if (booking.Status == "cancelled")
@@ -424,11 +436,10 @@ public class BookingService : IBookingService
                     booking.ReferenceCode,
                     dateStr,
                     timeRange,
-                    null,                              // reason
-                    amountStr                          // ✅ NEW
+                    null,
+                    amountStr
                 );
             }
-            // ✅ refund email — only when there's an actual amount to refund
             else if (booking.Status == "refunded" && booking.TotalAmount > 0)
             {
                 await _email.NotifyCustomerBookingRefundedAsync(
@@ -437,16 +448,13 @@ public class BookingService : IBookingService
                     booking.ReferenceCode,
                     dateStr,
                     timeRange,
-                    amountStr                          // already there
+                    amountStr
                 );
             }
-            // "completed", "expired", "pending_payment", "payment_submitted"
-            // and zero-amount refunds: no customer email needed
         }
         catch
         {
             // Never let an email failure fail the underlying status update.
-            // EmailService already logs the failure internally.
         }
     }
 
@@ -466,7 +474,7 @@ public class BookingService : IBookingService
                 s.Date.ToString("yyyy-MM-dd"),
                 s.StartTime.ToString("HH:mm"),
                 s.EndTime.ToString("HH:mm"),
-                false, // IsAvailable - always false for booked slots
+                false,
                 s.Price
             )).ToList(),
             b.TotalAmount,
@@ -479,6 +487,7 @@ public class BookingService : IBookingService
             b.PaymentReference
         );
     }
+
     public async Task<BookingDto> CreateStaffBookingAsync(StaffCreateBookingRequest request, Guid clientId)
     {
         // ─── Validate court ───────────────────────────────────────
@@ -492,6 +501,9 @@ public class BookingService : IBookingService
         // ─── Validate date ────────────────────────────────────────
         if (!DateTime.TryParse(request.Date, out var bookingDate))
             throw new InvalidOperationException("Invalid date format");
+
+        // ⭐ NEW — enforce max advance booking window (staff bookings too)
+        await EnsureWithinAdvanceWindowAsync(clientId, bookingDate);
 
         if (request.Slots == null || !request.Slots.Any())
             throw new InvalidOperationException("At least one time slot is required");
@@ -509,8 +521,8 @@ public class BookingService : IBookingService
                     && b.Date == bookingDate
                     && b.Status != "cancelled"
                     && b.Status != "expired"
-                    && b.Status != "rejected"      // ✅ NEW
-                    && b.Status != "refunded")      // ✅ NEW — refunded frees the slot
+                    && b.Status != "rejected"
+                    && b.Status != "refunded")
                 .SelectMany(b => b.Slots)
                 .Where(s => s.Date == bookingDate
                     && s.StartTime < endTime
@@ -538,7 +550,7 @@ public class BookingService : IBookingService
             case "pay_later":
                 status = "pending_payment";
                 paymentMethod = "cash";
-                expiresAt = null; // never expires — payment on arrival
+                expiresAt = null;
                 break;
 
             case "free":
@@ -556,7 +568,7 @@ public class BookingService : IBookingService
                 break;
         }
 
-        // ─── Calculate total (default: per-slot price via pricing rules) ───
+        // ─── Calculate total ──────────────────────────────────────
         decimal totalAmount;
         if (request.TotalAmount.HasValue && request.TotalAmount.Value >= 0)
         {
@@ -564,7 +576,6 @@ public class BookingService : IBookingService
         }
         else
         {
-            // Load pricing rules once for this court so we don't hit the DB per slot
             var courtWithRules = await _db.Courts
                 .Include(c => c.PricingRules)
                 .FirstAsync(c => c.Id == courtGuid);
@@ -615,7 +626,6 @@ public class BookingService : IBookingService
         _db.Bookings.Add(booking);
         await _db.SaveChangesAsync();
 
-        // ─── Optional: send confirmation to customer ──────────────
         if (request.SendConfirmation && !string.IsNullOrWhiteSpace(request.CustomerEmail))
         {
             try
@@ -629,11 +639,12 @@ public class BookingService : IBookingService
                     $"₱{booking.TotalAmount:N2}"
                 );
             }
-            catch { /* don't fail the whole request if email breaks */ }
+            catch { }
         }
 
         return MapToDto(booking, court.Name);
     }
+
     public async Task<List<BookingSummaryDto>> TrackBookingSummariesByEmailAsync(string email, Guid clientId)
     {
         if (string.IsNullOrWhiteSpace(email))

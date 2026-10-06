@@ -46,7 +46,19 @@ public class ClientService : IClientService
             client.PaymentMethods = JsonSerializer.Serialize(request.PaymentMethods);
         }
 
-        // ⭐ Cascade: strip removed amenities from every court of this client
+        // ⭐ NEW — Max advance booking window
+        if (request.MaxAdvanceBookingDays is int maxDays)
+        {
+            if (maxDays < 0)
+                throw new ArgumentException("Max advance booking days cannot be negative.");
+
+            if (maxDays > 365)
+                throw new ArgumentException("Max advance booking days cannot exceed 365.");
+
+            client.MaxAdvanceBookingDays = maxDays;
+        }
+
+        // Cascade: strip removed amenities from every court of this client
         if (request.AvailableAmenities is not null)
         {
             var oldList = client.AvailableAmenities;
@@ -97,7 +109,7 @@ public class ClientService : IClientService
         return MapToDto(client);
     }
 
-    // ⭐ Single mapping method — used by both read and write paths
+    // Single mapping method — used by both read and write paths
     private static ClientDto MapToDto(Client client)
     {
         return new ClientDto(
@@ -114,7 +126,8 @@ public class ClientService : IClientService
                 : null,
             client.AvailableAmenities
                 .Select(a => new AmenityItemDto(a.Name, a.Icon, a.Description))
-                .ToList()
+                .ToList(),
+            client.MaxAdvanceBookingDays
         );
     }
 }

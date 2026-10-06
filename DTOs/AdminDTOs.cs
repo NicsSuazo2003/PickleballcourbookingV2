@@ -16,7 +16,6 @@ public record AnalyticsDto(
     double UsersGrowth
 );
 
-// ✅ NEW - Per-court analytics
 public record CourtAnalyticsDto(
     string CourtId,
     string CourtName,
@@ -65,5 +64,6 @@ public record UpdateClientSettingsRequest(
     string? GcashNumber,
     string? GcashAccountName,
     object? PaymentMethods,
-    List<AmenityItemDto>? AvailableAmenities  
+    List<AmenityItemDto>? AvailableAmenities,
+    int? MaxAdvanceBookingDays   // ⭐ NEW
 );
