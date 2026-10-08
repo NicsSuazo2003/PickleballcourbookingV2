@@ -1,5 +1,4 @@
-﻿// Interfaces/IBookingService.cs
-using PickleballBookingSystem.DTOs;
+﻿using PickleballBookingSystem.DTOs;
 
 namespace PickleballBookingSystem.Interfaces;
 
@@ -14,8 +13,6 @@ public interface IBookingService
     Task<BookingDto> UpdateBookingStatusAsync(Guid id, string status, Guid clientId);
     Task<BookingDto> AdminUpdateBookingAsync(Guid id, AdminUpdateBookingRequest request, Guid clientId);
     Task<BookingDto> UploadPaymentAsync(Guid id, string screenshotBase64, string? paymentReference, Guid clientId);
-    // ✅ FIXED: screenshotBase64 is now nullable — a payment can be submitted
-    // with just a reference number and no screenshot.
     Task<BookingDto> UploadPaymentScreenshotAsync(Guid id, string? screenshotBase64, string? paymentReference, string? paymentMethod, Guid clientId);
     Task ConfirmPaymentAsync(Guid id, Guid clientId);
     Task CancelBookingAsync(Guid id, Guid clientId);
@@ -24,4 +21,10 @@ public interface IBookingService
     Task<List<BookingSummaryDto>> TrackBookingSummariesByEmailAsync(string email, Guid clientId);
 
     Task<BookingDto> CreateStaffBookingAsync(StaffCreateBookingRequest request, Guid clientId);
+
+    // ✅ NEW — move a booking to a different court / date / time
+    Task<RescheduleBookingResponse> RescheduleBookingAsync(
+        Guid id,
+        RescheduleBookingRequest request,
+        Guid clientId);
 }

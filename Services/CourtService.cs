@@ -99,12 +99,14 @@ public class CourtService : ICourtService
     // ========================================
     // ✅ AVAILABILITY (COURT-SPECIFIC WITH CLIENT)
     // ========================================
-
-    public async Task<List<TimeSlotAvailabilityDto>> GetCourtAvailabilityAsync(Guid courtId, DateTime date, Guid clientId)
+    public async Task<List<TimeSlotAvailabilityDto>> GetCourtAvailabilityAsync(
+        Guid courtId,
+        DateTime date,
+        Guid clientId,
+        Guid? excludeBookingId = null)
     {
         date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
 
-        // ✅ Include PricingRules so the resolver can consult the new per-court rules
         var court = await _db.Courts
             .Include(c => c.PricingRules)
             .FirstOrDefaultAsync(c => c.Id == courtId && c.ClientId == clientId)
@@ -114,23 +116,39 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
-        // Slots taken by regular bookings on THIS court
-        var bookedTimes = await _db.TimeSlots
-            .Where(s => s.Date.Date == date.Date && s.Booking.CourtId == courtId)
-            .Join(_db.Bookings.Where(b =>
-                    b.Status != "cancelled"
-                    && b.Status != "expired"
-                    && b.Status != "rejected"
-                    && b.Status != "refunded"
-                    && b.ClientId == clientId),
-                s => s.BookingId, b => b.Id, (s, b) => s.StartTime)
+        // ✅ Pull StartTime AND EndTime for every live slot on this court.
+        //    - Excludes the booking being rescheduled (if any) so its own
+        //      current slots show up as available in the reschedule modal.
+        //    - Filters non-terminal statuses.
+        var bookedSlots = await _db.TimeSlots
+            .Where(s => s.Date.Date == date.Date
+                     && s.Booking.CourtId == courtId
+                     && s.Booking.ClientId == clientId
+                     && s.Booking.Id != (excludeBookingId ?? Guid.Empty)
+                     && s.Booking.Status != "cancelled"
+                     && s.Booking.Status != "expired"
+                     && s.Booking.Status != "rejected"
+                     && s.Booking.Status != "refunded")
+            .Select(s => new { s.StartTime, s.EndTime })
             .ToListAsync();
+
+        // ✅ Expand each booking across its full [StartTime, EndTime) range.
+        //    Prevents multi-hour single rows (e.g. from Open Play) from
+        //    leaving their second/third hours looking free.
+        var bookedSet = new HashSet<int>();
+        foreach (var bs in bookedSlots)
+        {
+            var startH = bs.StartTime.Hour;
+            var endH = bs.EndTime.Hour == 0 ? 24 : bs.EndTime.Hour;
+            for (int h = startH; h < endH; h++) bookedSet.Add(h);
+        }
 
         var blockedDates = await _db.BlockedDates
-            .Where(b => b.Date.Date == date.Date && (b.CourtId == null || b.CourtId == courtId) && b.ClientId == clientId)
+            .Where(b => b.Date.Date == date.Date
+                     && (b.CourtId == null || b.CourtId == courtId)
+                     && b.ClientId == clientId)
             .ToListAsync();
 
-        // Hours occupied by any active Open Play session using this court
         var openPlayWindows = await _db.OpenPlaySessions
             .Where(s => s.IsActive
                      && s.ClientId == clientId
@@ -139,13 +157,13 @@ public class CourtService : ICourtService
             .Select(s => new { s.StartTime, s.EndTime })
             .ToListAsync();
 
-        var bookedSet = bookedTimes.Select(t => $"{t.Hour:D2}:00").ToHashSet();
-
         var blockedSet = new HashSet<int>();
         foreach (var bd in blockedDates)
         {
             if (bd.StartTime == null)
+            {
                 for (int h = openHour; h < closeHour; h++) blockedSet.Add(h);
+            }
             else
             {
                 var endH = bd.EndTime?.Hour ?? closeHour;
@@ -167,13 +185,12 @@ public class CourtService : ICourtService
             var endTime = $"{(h + 1) % 24:D2}:00";
 
             var isPast = isToday && (h < phTime.Hour || (h == phTime.Hour && 0 < phTime.Minute));
-            var isBooked = bookedSet.Contains(startTime);
+            var isBooked = bookedSet.Contains(h);           // ✅ int lookup now
             var isBlocked = blockedSet.Contains(h);
 
             var isOpenPlayBlocked = openPlayWindows.Any(w =>
                 w.StartTime.Hour <= h && h < (w.EndTime.Hour == 0 ? 24 : w.EndTime.Hour));
 
-            // ✅ Price resolved via per-court pricing rules (falls back to base rate)
             var slotPrice = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, slotTime);
 
             slots.Add(new TimeSlotAvailabilityDto(

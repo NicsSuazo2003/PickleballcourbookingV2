@@ -50,6 +50,11 @@ public record TrackBookingRequest(string ReferenceCode, string Email);
 
 public record UploadPaymentScreenshotRequest(IFormFile Screenshot);
 
+public record UploadPaymentRequest(
+    string PaymentReference,
+    string? PaymentMethod
+);
+
 // ✅ NEW: staff manual booking
 public record StaffCreateBookingRequest(
     string CourtId,
@@ -80,4 +85,25 @@ public record BookingSummaryDto(
     string Status,
     decimal TotalAmount,
     string CreatedAt
+);
+// ✅ NEW — reschedule request: any court, any date, any time
+public record RescheduleBookingRequest(
+    string? CourtId,                // null = keep current court
+    string? Date,                   // null = keep current date (YYYY-MM-DD)
+    List<StaffSlotRequest> Slots,   // required — the full new slot set
+    string? Reason,                 // optional, audit + customer email
+    string? StaffNotes              // optional, internal only
+);
+
+// ✅ NEW — reschedule response with delta info for the UI
+public record RescheduleBookingResponse(
+    BookingDto Booking,
+    List<TimeSlotDto> PreviousSlots,
+    string PreviousDate,
+    string PreviousCourtId,
+    string PreviousCourtName,
+    decimal PreviousTotalAmount,
+    decimal NewTotalAmount,
+    decimal BalanceDue,             // positive = customer owes more
+    decimal RefundDue               // positive = customer is owed a refund
 );

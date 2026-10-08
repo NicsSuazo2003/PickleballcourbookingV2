@@ -73,6 +73,17 @@ public class AdminController : ControllerBase
         return Ok(booking);
     }
 
+    [HttpPatch("bookings/{id}/reschedule")]
+    [Authorize(Roles = "admin,staff")]
+    public async Task<ActionResult<RescheduleBookingResponse>> RescheduleBooking(
+    Guid id,
+    RescheduleBookingRequest request)
+    {
+        var clientId = await GetClientId();
+        var result = await _booking.RescheduleBookingAsync(id, request, clientId);
+        return Ok(result);
+    }
+
     // ========================================
     // ✅ ADMIN ONLY ACCESS
     // ========================================
