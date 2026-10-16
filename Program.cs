@@ -110,11 +110,8 @@ _ = Task.Run(async () =>
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-        logger.LogInformation("[startup] Running DbSeeder...");
         DbSeeder.Initialize(db);
-        logger.LogInformation("[startup] DbSeeder done.");
 
         var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
         Guid clientId;
@@ -132,20 +129,13 @@ _ = Task.Run(async () =>
         {
             var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
 
-            logger.LogInformation("[startup] AutoCompletePastBookings for {ClientId}...", clientId);
             await bookingService.AutoCompletePastBookingsAsync(clientId);
-
-            logger.LogInformation("[startup] CancelExpiredPayments for {ClientId}...", clientId);
             await bookingService.CancelExpiredPaymentsAsync(clientId);
-
-            logger.LogInformation("[startup] Maintenance done.");
         }
     }
-    catch (Exception ex)
+    catch
     {
         // Don't crash the app if background startup work fails.
-        var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
-        loggerFactory.CreateLogger("Startup").LogError(ex, "[startup] Background task failed");
     }
 });
 
