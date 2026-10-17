@@ -106,8 +106,9 @@ public class AdminController : ControllerBase
         return Ok(analytics);
     }
 
+    // ✅ FIXED — staff now allowed to READ courts (needed for manual booking modal)
     [HttpGet("courts")]
-    [Authorize(Roles = "admin")]
+    [Authorize(Roles = "admin,staff")]
     public async Task<ActionResult<List<CourtDto>>> GetCourts()
     {
         var clientId = await GetClientId();
