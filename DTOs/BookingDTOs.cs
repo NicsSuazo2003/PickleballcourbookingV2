@@ -1,24 +1,30 @@
 ﻿namespace PickleballBookingSystem.DTOs;
 
+// ✅ NEW: Group slots by court in a single request
 public record CreateBookingRequest(
     string CustomerName,
     string CustomerEmail,
     string? CustomerPhone,
-    string CourtId,           // ✅ NEW - Which court to book
     string Date,
-    List<SlotRequest> Slots,
+    List<CourtSlotGroup> CourtGroups, // 👈 Replaces single CourtId + Slots
     decimal TotalAmount,
     string? Notes,
     string? Status = null,
     bool AdminOverride = false
 );
 
+// ✅ NEW: Holds one court and its specific slots
+public record CourtSlotGroup(
+    string CourtId,
+    List<SlotRequest> Slots
+);
+
 public record SlotRequest(string StartTime, string EndTime);
 
 public record BookingDto(
     string Id,
-    string CourtId,           // ✅ NEW
-    string CourtName,         // ✅ NEW - For display
+    string CourtId,
+    string CourtName,
     string CustomerName,
     string CustomerEmail,
     string? CustomerPhone,
@@ -55,7 +61,6 @@ public record UploadPaymentRequest(
     string? PaymentMethod
 );
 
-// ✅ NEW: staff manual booking
 public record StaffCreateBookingRequest(
     string CourtId,
     string Date,
@@ -64,10 +69,10 @@ public record StaffCreateBookingRequest(
     string? CustomerEmail,
     string? CustomerPhone,
     string? Notes,
-    string PaymentMode,       // "cash" | "gcash" | "pay_later" | "free"
-    decimal? TotalAmount,     // null = auto-calculate
-    string? StaffNotes,       // internal-only notes
-    bool SendConfirmation     // whether to email the customer
+    string PaymentMode,
+    decimal? TotalAmount,
+    string? StaffNotes,
+    bool SendConfirmation
 );
 
 public record StaffSlotRequest(
@@ -86,16 +91,15 @@ public record BookingSummaryDto(
     decimal TotalAmount,
     string CreatedAt
 );
-// ✅ NEW — reschedule request: any court, any date, any time
+
 public record RescheduleBookingRequest(
-    string? CourtId,                // null = keep current court
-    string? Date,                   // null = keep current date (YYYY-MM-DD)
-    List<StaffSlotRequest> Slots,   // required — the full new slot set
-    string? Reason,                 // optional, audit + customer email
-    string? StaffNotes              // optional, internal only
+    string? CourtId,
+    string? Date,
+    List<StaffSlotRequest> Slots,
+    string? Reason,
+    string? StaffNotes
 );
 
-// ✅ NEW — reschedule response with delta info for the UI
 public record RescheduleBookingResponse(
     BookingDto Booking,
     List<TimeSlotDto> PreviousSlots,
@@ -104,6 +108,6 @@ public record RescheduleBookingResponse(
     string PreviousCourtName,
     decimal PreviousTotalAmount,
     decimal NewTotalAmount,
-    decimal BalanceDue,             // positive = customer owes more
-    decimal RefundDue               // positive = customer is owed a refund
+    decimal BalanceDue,
+    decimal RefundDue
 );
