@@ -41,7 +41,9 @@ public class PricingRuleService : IPricingRuleService
             throw new ArgumentException("Invalid StartTime");
         if (!TryParseTime(request.EndTime, out var end))
             throw new ArgumentException("Invalid EndTime");
-        if (end <= start)
+
+        // 👇 FIX: Allow 00:00 (Midnight) as a valid end time
+        if (end != TimeOnly.MinValue && end <= start)
             throw new ArgumentException("EndTime must be after StartTime");
 
         var rule = new PricingRule
@@ -74,7 +76,9 @@ public class PricingRuleService : IPricingRuleService
             throw new ArgumentException("Invalid StartTime");
         if (!TryParseTime(request.EndTime, out var end))
             throw new ArgumentException("Invalid EndTime");
-        if (end <= start)
+
+        // 👇 FIX: Allow 00:00 (Midnight) as a valid end time
+        if (end != TimeOnly.MinValue && end <= start)
             throw new ArgumentException("EndTime must be after StartTime");
 
         rule.Label = request.Label.Trim();
@@ -111,12 +115,6 @@ public class PricingRuleService : IPricingRuleService
         return ResolvePriceFromCourt(court, date, startTime);
     }
 
-    /// <summary>
-    /// Resolves the hourly price for a slot.
-    ///   1. If any pricing rule matches (by day + time, highest priority wins),
-    ///      return that rule's price.
-    ///   2. Otherwise fall back to the court's base rate.
-    /// </summary>
     public decimal ResolvePriceFromCourt(Court court, DateOnly date, TimeOnly startTime)
     {
         if (court.PricingRules is { Count: > 0 })
@@ -131,7 +129,8 @@ public class PricingRuleService : IPricingRuleService
                         .Select(d => d.Trim().ToLowerInvariant())
                         .Contains(dayKey)) &&
                     startTime >= r.StartTime &&
-                    startTime < r.EndTime)
+                    // 👇 FIX: If EndTime is 00:00, treat it as the end of the day (always true)
+                    (r.EndTime == TimeOnly.MinValue || startTime < r.EndTime))
                 .OrderByDescending(r => r.Priority)
                 .ThenBy(r => r.StartTime)
                 .FirstOrDefault();
@@ -139,12 +138,8 @@ public class PricingRuleService : IPricingRuleService
             if (match is not null) return match.PricePerHour;
         }
 
-        // No rule matched → base rate. Peak pricing is now expressed as a rule,
-        // so the old peak-window fallback is no longer needed.
         return court.PricePerHour;
     }
-
-    // ── Helpers ─────────────────────────────────────────────────────────
 
     private static PricingRuleDto ToDto(PricingRule r) => new()
     {
