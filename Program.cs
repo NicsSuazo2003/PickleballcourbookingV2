@@ -66,6 +66,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientResolver>();
 builder.Services.AddScoped<IClientService, ClientService>();
+builder.Services.AddHostedService<ExpiredBookingWorker>();
 
 // ✅ Add Health Checks
 builder.Services.AddHealthChecks();
