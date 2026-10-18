@@ -55,9 +55,9 @@ public class CourtController : ControllerBase
 
     [HttpGet("{id}/availability")]
     public async Task<ActionResult<List<TimeSlotAvailabilityDto>>> GetAvailability(
-    Guid id,
-    [FromQuery] DateTime date,
-    [FromQuery] Guid? excludeBookingId = null)
+        Guid id,
+        [FromQuery] DateTime date,
+        [FromQuery] Guid? excludeBookingId = null)
     {
         var clientId = await GetClientId();
         var slots = await _court.GetCourtAvailabilityAsync(id, date, clientId, excludeBookingId);
@@ -109,7 +109,8 @@ public class CourtController : ControllerBase
     {
         var clientId = await GetClientId();
         var result = await _court.AddBlockedDateAsync(request, id, clientId);
-        return CreatedAtAction(nameof(GetBlockedDates), new { id }, result);
+        // Changed to Ok() to prevent CreatedAtAction routing issues
+        return Ok(result);
     }
 
     [Authorize(Roles = "admin")]
@@ -122,7 +123,7 @@ public class CourtController : ControllerBase
     }
 
     // ========================================
-    // ⚠️ DEPRECATED - Single Court Endpoints (Backward Compatibility)
+    // ⚠️ DEPRECATED - Single Court Endpoints
     // ========================================
 
     [HttpGet("legacy")]
@@ -161,7 +162,7 @@ public class CourtController : ControllerBase
     {
         var clientId = await GetClientId();
         var result = await _court.AddBlockedDateAsync(request, null, clientId);
-        return CreatedAtAction(nameof(GetBlockedDatesLegacy), result);
+        return Ok(result);
     }
 
     // ========================================
