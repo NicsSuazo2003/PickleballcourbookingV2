@@ -55,7 +55,8 @@ public record TimeSlotAvailabilityDto(
     string StartTime,
     string EndTime,
     bool IsAvailable,
-    decimal Price
+    decimal Price,
+    bool IsPeak
 );
 
 public record BlockedDateDto(
