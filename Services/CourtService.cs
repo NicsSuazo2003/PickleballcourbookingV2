@@ -178,6 +178,8 @@ public class CourtService : ICourtService
 
         var slots = new List<TimeSlotAvailabilityDto>();
 
+        // Services/CourtService.cs inside GetCourtAvailabilityAsync
+
         for (int h = openHour; h < closeHour; h++)
         {
             var slotTime = new TimeOnly(h % 24, 0);
@@ -185,20 +187,26 @@ public class CourtService : ICourtService
             var endTime = $"{(h + 1) % 24:D2}:00";
 
             var isPast = isToday && (h < phTime.Hour || (h == phTime.Hour && 0 < phTime.Minute));
-            var isBooked = bookedSet.Contains(h);           // ✅ int lookup now
+            var isBooked = bookedSet.Contains(h);
             var isBlocked = blockedSet.Contains(h);
 
             var isOpenPlayBlocked = openPlayWindows.Any(w =>
                 w.StartTime.Hour <= h && h < (w.EndTime.Hour == 0 ? 24 : w.EndTime.Hour));
 
+            // 1. Resolve the price using the service
             var slotPrice = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, slotTime);
+
+            // 2. Determine if it's a peak price by comparing it to the base rate
+            var isPeak = slotPrice > court.PricePerHour;
 
             slots.Add(new TimeSlotAvailabilityDto(
                 $"slot-{courtId}-{date:yyyy-MM-dd}-{h}",
                 date.ToString("yyyy-MM-dd"),
                 startTime, endTime,
                 !isPast && !isBooked && !isBlocked && !isOpenPlayBlocked,
-                slotPrice));
+                slotPrice,
+                isPeak // 👈 Pass the boolean
+            ));
         }
 
         return slots;
