@@ -43,121 +43,128 @@ public class BookingService : IBookingService
             throw new InvalidOperationException("Invalid date format");
 
         bookingDate = DateTime.SpecifyKind(bookingDate.Date, DateTimeKind.Utc);
-
         await EnsureWithinAdvanceWindowAsync(clientId, bookingDate);
 
         if (request.CourtGroups == null || !request.CourtGroups.Any())
             throw new InvalidOperationException("At least one court must be selected");
 
-        // 1. Validate every slot for every court, and compute totals
-        var newSlots = new List<(Guid CourtId, TimeOnly Start, TimeOnly End, decimal Price)>();
-        decimal computedTotal = 0m;
-        var dateOnly = DateOnly.FromDateTime(bookingDate);
+        // Start Serializable transaction
+        using var transaction = await _db.Database.BeginTransactionAsync(
+            System.Data.IsolationLevel.Serializable);
 
-        foreach (var group in request.CourtGroups)
-        {
-            if (!Guid.TryParse(group.CourtId, out var courtGuid))
-                throw new InvalidOperationException($"Invalid court ID: {group.CourtId}");
-
-            var court = await _db.Courts
-                .Include(c => c.PricingRules)
-                .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
-                ?? throw new KeyNotFoundException($"Court {group.CourtId} not found");
-
-            foreach (var slot in group.Slots)
-            {
-                if (!TimeOnly.TryParse(slot.StartTime, out var startTime))
-                    throw new InvalidOperationException($"Invalid start time: {slot.StartTime}");
-                if (!TimeOnly.TryParse(slot.EndTime, out var endTime))
-                    throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
-
-                // Conflict check
-                var conflicting = await _db.Bookings
-                    .Where(b => b.CourtId == courtGuid
-                        && b.Date == bookingDate
-                        && b.Status != "cancelled"
-                        && b.Status != "expired"
-                        && b.Status != "rejected"
-                        && b.Status != "refunded")
-                    .SelectMany(b => b.Slots)
-                    .Where(s => s.Date == bookingDate
-                        && s.StartTime < endTime
-                        && s.EndTime > startTime)
-                    .AnyAsync();
-
-                if (conflicting)
-                    throw new InvalidOperationException(
-                        $"Time slot {slot.StartTime}-{slot.EndTime} is already booked on {court.Name}");
-
-                // Blocked date check
-                var isBlocked = await _db.BlockedDates
-                    .AnyAsync(bd => bd.CourtId == courtGuid
-                        && bd.Date == bookingDate
-                        && (bd.StartTime == null || bd.StartTime <= startTime)
-                        && (bd.EndTime == null || bd.EndTime >= endTime));
-
-                if (isBlocked)
-                    throw new InvalidOperationException(
-                        $"Time slot {slot.StartTime}-{slot.EndTime} is blocked on {court.Name}");
-
-                // Price
-                var hours = (decimal)(endTime - startTime).TotalHours;
-                var ratePerHour = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, startTime);
-                var price = Math.Round(ratePerHour * hours, 2);
-
-                newSlots.Add((courtGuid, startTime, endTime, price));
-                computedTotal += price;
-            }
-        }
-
-        // 2. Create ONE booking that contains ALL slots across ALL courts
-        var referenceCode = $"BK-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
-        var primaryCourtId = newSlots.First().CourtId;
-
-        var booking = new Booking
-        {
-            ClientId = clientId,
-            CourtId = primaryCourtId, // "primary" court for the booking row
-            CustomerName = request.CustomerName.Trim(),
-            CustomerEmail = request.CustomerEmail.Trim().ToLower(),
-            CustomerPhone = request.CustomerPhone?.Trim(),
-            ReferenceCode = referenceCode,
-            Date = bookingDate,
-            TotalAmount = computedTotal,
-            Status = "pending_payment",
-            PaymentMethod = "gcash",
-            Notes = request.Notes?.Trim(),
-            CreatedAt = DateTime.UtcNow,
-            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
-            Slots = newSlots.Select(s => new TimeSlot
-            {
-                CourtId = s.CourtId,
-                Date = bookingDate,
-                StartTime = s.Start,
-                EndTime = s.End,
-                Price = s.Price
-            }).ToList()
-        };
-
-        _db.Bookings.Add(booking);
-        await _db.SaveChangesAsync();
-
-        // 3. Notify admin
         try
         {
-            var primaryCourt = await _db.Courts.FindAsync(primaryCourtId);
-            await _email.NotifyAdminNewBookingAsync(
-                booking.CustomerName,
-                booking.ReferenceCode,
-                booking.Date.ToString("yyyy-MM-dd"),
-                string.Join(", ", booking.Slots.Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}")),
-                $"₱{booking.TotalAmount:N2}"
-            );
-        }
-        catch { }
+            var newSlots = new List<(Guid CourtId, TimeOnly Start, TimeOnly End, decimal Price)>();
+            decimal computedTotal = 0m;
+            var dateOnly = DateOnly.FromDateTime(bookingDate);
 
-        var primaryCourtName = (await _db.Courts.FindAsync(primaryCourtId))?.Name ?? "Multiple Courts";
-        return MapToDto(booking, primaryCourtName);
+            foreach (var group in request.CourtGroups)
+            {
+                if (!Guid.TryParse(group.CourtId, out var courtGuid))
+                    throw new InvalidOperationException($"Invalid court ID: {group.CourtId}");
+
+                var court = await _db.Courts
+                    .Include(c => c.PricingRules)
+                    .FirstOrDefaultAsync(c => c.Id == courtGuid && c.ClientId == clientId)
+                    ?? throw new KeyNotFoundException($"Court {group.CourtId} not found");
+
+                foreach (var slot in group.Slots)
+                {
+                    if (!TimeOnly.TryParse(slot.StartTime, out var startTime))
+                        throw new InvalidOperationException($"Invalid start time: {slot.StartTime}");
+                    if (!TimeOnly.TryParse(slot.EndTime, out var endTime))
+                        throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
+
+                    // 👇 FIXED CONFLICT CHECK: Look at TimeSlot.CourtId, not Booking.CourtId
+                    var conflicting = await _db.TimeSlots
+                        .Where(s => s.CourtId == courtGuid
+                                 && s.Date == bookingDate
+                                 && s.StartTime < endTime
+                                 && s.EndTime > startTime
+                                 && s.Booking.Status != "cancelled"
+                                 && s.Booking.Status != "expired"
+                                 && s.Booking.Status != "rejected"
+                                 && s.Booking.Status != "refunded")
+                        .AnyAsync();
+
+                    if (conflicting)
+                        throw new InvalidOperationException(
+                            $"Time slot {slot.StartTime}-{slot.EndTime} is already booked on {court.Name}");
+
+                    // Blocked date check
+                    var isBlocked = await _db.BlockedDates
+                        .AnyAsync(bd => bd.CourtId == courtGuid
+                            && bd.Date == bookingDate
+                            && (bd.StartTime == null || bd.StartTime <= startTime)
+                            && (bd.EndTime == null || bd.EndTime >= endTime));
+
+                    if (isBlocked)
+                        throw new InvalidOperationException(
+                            $"Time slot {slot.StartTime}-{slot.EndTime} is blocked on {court.Name}");
+
+                    // Price
+                    var hours = (decimal)(endTime - startTime).TotalHours;
+                    var ratePerHour = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, startTime);
+                    var price = Math.Round(ratePerHour * hours, 2);
+
+                    newSlots.Add((courtGuid, startTime, endTime, price));
+                    computedTotal += price;
+                }
+            }
+
+            var referenceCode = $"BK-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+            var primaryCourtId = newSlots.First().CourtId;
+
+            var booking = new Booking
+            {
+                ClientId = clientId,
+                CourtId = primaryCourtId,
+                CustomerName = request.CustomerName.Trim(),
+                CustomerEmail = request.CustomerEmail.Trim().ToLower(),
+                CustomerPhone = request.CustomerPhone?.Trim(),
+                ReferenceCode = referenceCode,
+                Date = bookingDate,
+                TotalAmount = computedTotal,
+                Status = "pending_payment",
+                PaymentMethod = "gcash",
+                Notes = request.Notes?.Trim(),
+                CreatedAt = DateTime.UtcNow,
+                PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                Slots = newSlots.Select(s => new TimeSlot
+                {
+                    CourtId = s.CourtId,
+                    Date = bookingDate,
+                    StartTime = s.Start,
+                    EndTime = s.End,
+                    Price = s.Price
+                }).ToList()
+            };
+
+            _db.Bookings.Add(booking);
+            await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            try
+            {
+                var primaryCourt = await _db.Courts.FindAsync(primaryCourtId);
+                await _email.NotifyAdminNewBookingAsync(
+                    booking.CustomerName,
+                    booking.ReferenceCode,
+                    booking.Date.ToString("yyyy-MM-dd"),
+                    string.Join(", ", booking.Slots.Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}")),
+                    $"₱{booking.TotalAmount:N2}"
+                );
+            }
+            catch { }
+
+            var primaryCourtName = (await _db.Courts.FindAsync(primaryCourtId))?.Name ?? "Multiple Courts";
+            return MapToDto(booking, primaryCourtName);
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     public async Task<BookingDto> GetBookingAsync(Guid id, Guid clientId)
