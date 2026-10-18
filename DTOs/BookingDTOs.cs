@@ -1,19 +1,17 @@
 ﻿namespace PickleballBookingSystem.DTOs;
 
-// ✅ NEW: Group slots by court in a single request
 public record CreateBookingRequest(
     string CustomerName,
     string CustomerEmail,
     string? CustomerPhone,
     string Date,
-    List<CourtSlotGroup> CourtGroups, // 👈 Replaces single CourtId + Slots
+    List<CourtSlotGroup> CourtGroups,
     decimal TotalAmount,
     string? Notes,
     string? Status = null,
     bool AdminOverride = false
 );
 
-// ✅ NEW: Holds one court and its specific slots
 public record CourtSlotGroup(
     string CourtId,
     List<SlotRequest> Slots
@@ -43,6 +41,7 @@ public record BookingDto(
 
 public record TimeSlotDto(
     string Id,
+    string CourtId,   // 👈 ADDED
     string Date,
     string StartTime,
     string EndTime,
