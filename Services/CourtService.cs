@@ -25,7 +25,7 @@ public class CourtService : ICourtService
     {
         return await _db.Courts
             .Where(c => c.ClientId == clientId)
-            .OrderBy(c => c.CreatedAt)               // ✅ NEW — stable, creation-order sort
+            .OrderBy(c => c.CreatedAt)
             .Select(c => MapToDto(c))
             .ToListAsync();
     }
@@ -55,7 +55,6 @@ public class CourtService : ICourtService
             Status = "active",
             Rating = 0,
             ClientId = clientId
-            // CreatedAt is set automatically by the property initializer
         };
         _db.Courts.Add(court);
         await _db.SaveChangesAsync();
@@ -116,10 +115,6 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
-        // ✅ Pull StartTime AND EndTime for every live slot on this court.
-        //    - Excludes the booking being rescheduled (if any) so its own
-        //      current slots show up as available in the reschedule modal.
-        //    - Filters non-terminal statuses.
         var bookedSlots = await _db.TimeSlots
             .Where(s => s.Date.Date == date.Date
                      && s.Booking.CourtId == courtId
@@ -132,9 +127,6 @@ public class CourtService : ICourtService
             .Select(s => new { s.StartTime, s.EndTime })
             .ToListAsync();
 
-        // ✅ Expand each booking across its full [StartTime, EndTime) range.
-        //    Prevents multi-hour single rows (e.g. from Open Play) from
-        //    leaving their second/third hours looking free.
         var bookedSet = new HashSet<int>();
         foreach (var bs in bookedSlots)
         {
@@ -178,8 +170,6 @@ public class CourtService : ICourtService
 
         var slots = new List<TimeSlotAvailabilityDto>();
 
-        // Services/CourtService.cs inside GetCourtAvailabilityAsync
-
         for (int h = openHour; h < closeHour; h++)
         {
             var slotTime = new TimeOnly(h % 24, 0);
@@ -193,10 +183,7 @@ public class CourtService : ICourtService
             var isOpenPlayBlocked = openPlayWindows.Any(w =>
                 w.StartTime.Hour <= h && h < (w.EndTime.Hour == 0 ? 24 : w.EndTime.Hour));
 
-            // 1. Resolve the price using the service
             var slotPrice = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, slotTime);
-
-            // 2. Determine if it's a peak price by comparing it to the base rate
             var isPeak = slotPrice > court.PricePerHour;
 
             slots.Add(new TimeSlotAvailabilityDto(
@@ -205,7 +192,7 @@ public class CourtService : ICourtService
                 startTime, endTime,
                 !isPast && !isBooked && !isBlocked && !isOpenPlayBlocked,
                 slotPrice,
-                isPeak // 👈 Pass the boolean
+                isPeak
             ));
         }
 
@@ -237,23 +224,41 @@ public class CourtService : ICourtService
 
     public async Task<BlockedDateDto> AddBlockedDateAsync(CreateBlockedDateRequest request, Guid? courtId, Guid clientId)
     {
+        if (clientId == Guid.Empty)
+            throw new ArgumentException("ClientId is missing. Ensure the X-Client-Subdomain header is sent.");
+
+        if (!DateTime.TryParse(request.Date, out var parsedDate))
+            throw new ArgumentException("Invalid date format");
+
         var blocked = new BlockedDate
         {
+            Id = Guid.NewGuid(),
             CourtId = courtId,
             ClientId = clientId,
-            Date = DateTime.SpecifyKind(DateTime.Parse(request.Date).Date, DateTimeKind.Utc),
-            StartTime = request.StartTime != null ? TimeOnly.Parse(request.StartTime) : null,
-            EndTime = request.EndTime != null ? TimeOnly.Parse(request.EndTime) : null,
-            Reason = request.Reason
+            Date = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc),
+            StartTime = !string.IsNullOrEmpty(request.StartTime) ? TimeOnly.Parse(request.StartTime) : null,
+            EndTime = !string.IsNullOrEmpty(request.EndTime) ? TimeOnly.Parse(request.EndTime) : null,
+            Reason = request.Reason ?? "Maintenance",
+            CreatedAt = DateTime.UtcNow
         };
+
         _db.BlockedDates.Add(blocked);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            throw new Exception($"DB Error: {ex.InnerException?.Message ?? ex.Message}");
+        }
+
         return new BlockedDateDto(
             blocked.Id.ToString(),
             blocked.Date.ToString("yyyy-MM-dd"),
-            request.StartTime,
-            request.EndTime,
-            request.Reason
+            blocked.StartTime?.ToString("HH:mm"),
+            blocked.EndTime?.ToString("HH:mm"),
+            blocked.Reason
         );
     }
 
@@ -267,7 +272,7 @@ public class CourtService : ICourtService
     }
 
     // ========================================
-    // ⚠️ DEPRECATED - Single Court Methods (Backward Compatibility)
+    // ⚠️ DEPRECATED - Single Court Methods
     // ========================================
 
     public async Task<CourtDto> GetCourtAsync()
@@ -292,7 +297,7 @@ public class CourtService : ICourtService
     }
 
     // ========================================
-    // ✅ PRICE RULES (CLIENT-SPECIFIC — legacy feature, unchanged)
+    // ✅ PRICE RULES (CLIENT-SPECIFIC)
     // ========================================
 
     public async Task<List<PriceRuleDto>> GetPriceRulesAsync(Guid clientId)

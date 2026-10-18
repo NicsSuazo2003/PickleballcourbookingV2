@@ -29,5 +29,7 @@ public class BlockedDate
     }
 
     public Guid ClientId { get; set; }
-    public Client Client { get; set; } = null!;
+
+    // ✅ FIX: Make Client nullable so EF Core doesn't try to insert a new Client
+    public Client? Client { get; set; }
 }

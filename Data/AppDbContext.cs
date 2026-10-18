@@ -62,7 +62,6 @@ public class AppDbContext : DbContext
                 .HasColumnName("available_amenities_json")
                 .HasColumnType("jsonb");
 
-            // ⭐ NEW — max advance booking window
             e.Property(c => c.MaxAdvanceBookingDays)
                 .HasColumnName("max_advance_booking_days")
                 .HasDefaultValue(90);
@@ -168,19 +167,21 @@ public class AppDbContext : DbContext
                 .HasConversion(new DateTimeToUtcConverter());
         });
 
-        // ── BlockedDate ──
+        // ── BlockedDate (FIXED) ──
         modelBuilder.Entity<BlockedDate>(e =>
         {
-            e.HasOne(bd => bd.Court)
-                .WithMany(c => c.BlockedDates)
-                .HasForeignKey(bd => bd.CourtId)
-                .OnDelete(DeleteBehavior.SetNull);
-
             e.Property(bd => bd.ClientId).HasColumnName("client_id");
+
+            // 👇 This ensures EF Core maps the nullable Client relationship correctly
             e.HasOne(bd => bd.Client)
                 .WithMany()
                 .HasForeignKey(bd => bd.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(bd => bd.Court)
+                .WithMany(c => c.BlockedDates)
+                .HasForeignKey(bd => bd.CourtId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             e.Property(bd => bd.Date)
                 .HasConversion(new DateTimeToUtcConverter());
