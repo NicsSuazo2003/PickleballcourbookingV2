@@ -115,9 +115,10 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
+        // 👇 THE FIX: Check s.CourtId (TimeSlot.CourtId) instead of s.Booking.CourtId
         var bookedSlots = await _db.TimeSlots
             .Where(s => s.Date.Date == date.Date
-                     && s.Booking.CourtId == courtId
+                     && s.CourtId == courtId // ✅ CHANGED THIS LINE
                      && s.Booking.ClientId == clientId
                      && s.Booking.Id != (excludeBookingId ?? Guid.Empty)
                      && s.Booking.Status != "cancelled"
