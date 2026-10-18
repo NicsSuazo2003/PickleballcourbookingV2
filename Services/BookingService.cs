@@ -751,6 +751,7 @@ public class BookingService : IBookingService
             .OrderBy(s => s.StartTime)
             .Select(s => new TimeSlotDto(
                 s.Id.ToString(),
+                s.CourtId.ToString(), // 👈 ADDED THIS LINE
                 s.Date.ToString("yyyy-MM-dd"),
                 s.StartTime.ToString("HH:mm"),
                 s.EndTime.ToString("HH:mm"),
