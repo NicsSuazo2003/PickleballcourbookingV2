@@ -7,7 +7,7 @@ public record CourtDto(
     bool Indoor,
     decimal PricePerHour,
     decimal PeakPricePerHour,
-    string? Description,  // ✅ ADD THIS
+    string? Description,
     List<string> Amenities,
     double Rating,
     string ImageUrl,
@@ -18,13 +18,14 @@ public record CourtDto(
     string Dimensions,
     string Surface
 );
+
 public record CreateCourtRequest(
     string Name,
     string Type,
     bool Indoor,
     decimal PricePerHour,
     decimal PeakPricePerHour,
-    string? Description,  // ✅ ADD THIS
+    string? Description,
     List<string>? Amenities,
     string OpenTime,
     string CloseTime,
@@ -38,7 +39,7 @@ public record UpdateCourtRequest(
     bool? Indoor,
     decimal? PricePerHour,
     decimal? PeakPricePerHour,
-    string? Description,  // ✅ ADD THIS
+    string? Description,
     List<string>? Amenities,
     string? ImageUrl,
     List<string>? Images,
@@ -67,6 +68,7 @@ public record BlockedDateDto(
     string? Reason
 );
 
+// Ensure PascalCase properties so ASP.NET binder works seamlessly
 public record CreateBlockedDateRequest(
     string Date,
     string? StartTime,
