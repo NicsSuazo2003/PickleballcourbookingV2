@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Services/CourtService.cs
+using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
@@ -115,7 +116,7 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
-        // 👇 THE FIX: Check s.CourtId (TimeSlot.CourtId) instead of s.Booking.CourtId
+        // ✅ Pull StartTime AND EndTime for every live slot on this court.
         var bookedSlots = await _db.TimeSlots
             .Where(s => s.Date.Date == date.Date
                      && s.CourtId == courtId // ✅ CHANGED THIS LINE
@@ -159,9 +160,13 @@ public class CourtService : ICourtService
             }
             else
             {
+                var startH = bd.StartTime.Value.Hour;
+
+                // 👇 FIX: If EndTime is 00:00, treat it as 24 (End of day)
                 var endH = bd.EndTime?.Hour ?? closeHour;
                 if (endH == 0) endH = 24;
-                for (int h = bd.StartTime.Value.Hour; h < endH; h++) blockedSet.Add(h);
+
+                for (int h = startH; h < endH; h++) blockedSet.Add(h);
             }
         }
 
@@ -231,14 +236,29 @@ public class CourtService : ICourtService
         if (!DateTime.TryParse(request.Date, out var parsedDate))
             throw new ArgumentException("Invalid date format");
 
+        TimeOnly? startTime = null;
+        TimeOnly? endTime = null;
+
+        if (!string.IsNullOrEmpty(request.StartTime) && !string.IsNullOrEmpty(request.EndTime))
+        {
+            startTime = TimeOnly.Parse(request.StartTime);
+            endTime = TimeOnly.Parse(request.EndTime);
+
+            // 👇 FIX: Allow 00:00 as a valid end time (Midnight)
+            if (endTime != TimeOnly.MinValue && endTime <= startTime)
+            {
+                throw new ArgumentException("End time must be after start time.");
+            }
+        }
+
         var blocked = new BlockedDate
         {
             Id = Guid.NewGuid(),
             CourtId = courtId,
             ClientId = clientId,
             Date = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc),
-            StartTime = !string.IsNullOrEmpty(request.StartTime) ? TimeOnly.Parse(request.StartTime) : null,
-            EndTime = !string.IsNullOrEmpty(request.EndTime) ? TimeOnly.Parse(request.EndTime) : null,
+            StartTime = startTime,
+            EndTime = endTime,
             Reason = request.Reason ?? "Maintenance",
             CreatedAt = DateTime.UtcNow
         };
