@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting; // 👈 ADDED
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.RateLimiting; // 👈 ADDED
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PickleballBookingSystem.Data;
@@ -38,11 +40,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-
-            // ✅ FIX: Tell the JWT handler where to find the role and name claims.
-            // TokenService emits ClaimTypes.Role / ClaimTypes.Name (long URIs),
-            // but without these lines the handler defaults to "role" / "name"
-            // and [Authorize(Roles = "...")] fails with a 403 + empty body.
             RoleClaimType = ClaimTypes.Role,
             NameClaimType = ClaimTypes.Name,
         };
@@ -51,6 +48,17 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<EmailService>();
+
+// 👇 ADDED: Rate Limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("booking", opt =>
+    {
+        opt.PermitLimit = 5;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
+    });
+});
 
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -68,12 +76,9 @@ builder.Services.AddScoped<ClientResolver>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddHostedService<ExpiredBookingWorker>();
 
-// ✅ Add Health Checks
 builder.Services.AddHealthChecks();
-
 builder.Services.AddSwaggerGen();
 
-// ✅ UPDATED: Added new frontend domain to CORS allowed origins
 var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? new[] {
         "http://localhost:5173",
@@ -81,8 +86,8 @@ var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<st
         "https://sideout-playground.vercel.app",
         "https://sideoutplayground.vercel.app",
         "https://pickleball-client2.vercel.app",
-        "https://pickle-joe-booking-sys.vercel.app",      // Old domain
-        "https://centercourt-booking.vercel.app",         // ✅ NEW domain
+        "https://pickle-joe-booking-sys.vercel.app",
+        "https://centercourt-booking.vercel.app",
         "https://picklejoe.vercel.app"
     };
 
@@ -97,51 +102,33 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// ─────────────────────────────────────────────────────────────────
-// Background startup tasks
-// Run seeding + maintenance off the critical path so Kestrel binds
-// the port immediately. Render's health check will pass in ~2s.
-// ─────────────────────────────────────────────────────────────────
 _ = Task.Run(async () =>
 {
-    // Give Kestrel a moment to bind the port first
     await Task.Delay(TimeSpan.FromSeconds(5));
-
     try
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
         DbSeeder.Initialize(db);
-
         var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
         Guid clientId;
-        try
-        {
-            clientId = await clientService.GetClientIdBySubdomainAsync("picklejoe");
-        }
-        catch
-        {
-            var firstClient = await db.Clients.FirstOrDefaultAsync();
-            clientId = firstClient?.Id ?? Guid.Empty;
-        }
-
+        try { clientId = await clientService.GetClientIdBySubdomainAsync("picklejoe"); }
+        catch { var firstClient = await db.Clients.FirstOrDefaultAsync(); clientId = firstClient?.Id ?? Guid.Empty; }
         if (clientId != Guid.Empty)
         {
             var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
-
             await bookingService.AutoCompletePastBookingsAsync(clientId);
             await bookingService.CancelExpiredPaymentsAsync(clientId);
         }
     }
-    catch
-    {
-        // Don't crash the app if background startup work fails.
-    }
+    catch { }
 });
 
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseCors("Frontend");
+
+// 👇 ADDED: Rate Limiter Middleware
+app.UseRateLimiter();
 
 app.UseSwagger();
 app.UseSwaggerUI();

@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting; // 👈 ADDED
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -43,6 +44,7 @@ public class BookingController : ControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting("booking")] // 👈 ADDED
     public async Task<ActionResult<BookingDto>> Create(CreateBookingRequest request)
     {
         var clientId = await GetClientId();
@@ -70,7 +72,6 @@ public class BookingController : ControllerBase
         return Ok(summaries);
     }
 
-    // ✅ UPDATED — accepts an optional paymentMethod from the checkout form
     [HttpPost("{id}/upload-payment")]
     public async Task<ActionResult<BookingDto>> UploadPayment(
         Guid id,
@@ -84,7 +85,6 @@ public class BookingController : ControllerBase
         var clientId = await GetClientId();
         string? screenshotUrl = null;
 
-        // Screenshot is optional — only hit Supabase if one was actually sent
         if (screenshot != null && screenshot.Length > 0)
         {
             var supabaseUrl = _config["Supabase:Url"]!;
@@ -109,7 +109,6 @@ public class BookingController : ControllerBase
             screenshotUrl = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
         }
 
-        // ✅ Pass paymentMethod through to the service
         var booking = await _booking.UploadPaymentScreenshotAsync(
             id,
             screenshotUrl,
