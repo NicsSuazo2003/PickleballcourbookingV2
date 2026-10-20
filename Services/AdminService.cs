@@ -32,7 +32,10 @@ public class AdminService : IAdminService
         var activeUsers = bookings.Select(b => b.CustomerEmail).Distinct().Count();
 
         var confirmedBookings = bookings.Count(b => b.Status == "confirmed");
-        var pendingPayments = bookings.Count(b => b.Status == "pending_payment" || b.Status == "payment_submitted");
+        
+        // 👇 THE FIX: Separate "pending payment" (unpaid) from "payment submitted" (needs review)
+        var pendingPayments = bookings.Count(b => b.Status == "payment_submitted"); 
+        
         var completedBookings = bookings.Count(b => b.Status == "completed");
         var cancelledBookings = bookings.Count(b => b.Status == "cancelled" || b.Status == "rejected");
 
@@ -86,7 +89,9 @@ public class AdminService : IAdminService
                 .Where(b => b.Status == "confirmed" || b.Status == "completed")
                 .Sum(b => b.TotalAmount);
             var confirmed = bookings.Count(b => b.Status == "confirmed" || b.Status == "completed");
-            var pending = bookings.Count(b => b.Status == "pending_payment" || b.Status == "payment_submitted");
+            
+            // 👇 Also fix this to only count payment_submitted
+            var pending = bookings.Count(b => b.Status == "payment_submitted");
 
             var totalSlots = bookings.Sum(b => b.Slots.Count);
             var totalPossibleSlots = 12 * 30;
@@ -124,11 +129,9 @@ public class AdminService : IAdminService
 
     public async Task<UserDto> CreateStaffAsync(CreateStaffRequest request, Guid clientId)
     {
-        // Check if user already exists for this client
         if (await _db.Users.AnyAsync(u => u.Email == request.Email && u.ClientId == clientId))
             throw new InvalidOperationException("A user with this email already exists for this client.");
 
-        // Check if user exists globally (optional)
         if (await _db.Users.AnyAsync(u => u.Email == request.Email))
             throw new InvalidOperationException("This email is already registered.");
 
