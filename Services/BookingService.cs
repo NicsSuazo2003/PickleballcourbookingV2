@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Services/BookingService.cs
+using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
@@ -19,8 +20,6 @@ public class BookingService : IBookingService
         _pricingRuleService = pricingRuleService;
     }
 
-    // ⭐ NEW — validates the requested booking date against the client's
-    // max advance booking window. 0 = no limit.
     private async Task EnsureWithinAdvanceWindowAsync(Guid clientId, DateTime bookingDate)
     {
         var client = await _db.Clients.FindAsync(clientId);
@@ -48,7 +47,6 @@ public class BookingService : IBookingService
         if (request.CourtGroups == null || !request.CourtGroups.Any())
             throw new InvalidOperationException("At least one court must be selected");
 
-        // Start Serializable transaction
         using var transaction = await _db.Database.BeginTransactionAsync(
             System.Data.IsolationLevel.Serializable);
 
@@ -75,7 +73,6 @@ public class BookingService : IBookingService
                     if (!TimeOnly.TryParse(slot.EndTime, out var endTime))
                         throw new InvalidOperationException($"Invalid end time: {slot.EndTime}");
 
-                    // 👇 FIXED CONFLICT CHECK: Look at TimeSlot.CourtId, not Booking.CourtId
                     var conflicting = await _db.TimeSlots
                         .Where(s => s.CourtId == courtGuid
                                  && s.Date == bookingDate
@@ -91,7 +88,6 @@ public class BookingService : IBookingService
                         throw new InvalidOperationException(
                             $"Time slot {slot.StartTime}-{slot.EndTime} is already booked on {court.Name}");
 
-                    // Blocked date check
                     var isBlocked = await _db.BlockedDates
                         .AnyAsync(bd => bd.CourtId == courtGuid
                             && bd.Date == bookingDate
@@ -102,7 +98,6 @@ public class BookingService : IBookingService
                         throw new InvalidOperationException(
                             $"Time slot {slot.StartTime}-{slot.EndTime} is blocked on {court.Name}");
 
-                    // Price
                     var hours = (decimal)(endTime - startTime).TotalHours;
                     var ratePerHour = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, startTime);
                     var price = Math.Round(ratePerHour * hours, 2);
@@ -146,12 +141,23 @@ public class BookingService : IBookingService
 
             try
             {
-                var primaryCourt = await _db.Courts.FindAsync(primaryCourtId);
+                // 👇 FIX: Group the slots by court name for the email
+                var courtIds = booking.Slots.Select(s => s.CourtId).Distinct();
+                var courts = await _db.Courts.Where(c => courtIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name);
+
+                var slotsText = string.Join(" | ", booking.Slots
+                    .GroupBy(s => s.CourtId)
+                    .Select(g => {
+                        var courtName = courts.TryGetValue(g.Key, out var name) ? name : "Court";
+                        var times = string.Join(", ", g.OrderBy(s => s.StartTime).Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"));
+                        return $"{courtName}: {times}";
+                    }));
+
                 await _email.NotifyAdminNewBookingAsync(
                     booking.CustomerName,
                     booking.ReferenceCode,
                     booking.Date.ToString("yyyy-MM-dd"),
-                    string.Join(", ", booking.Slots.Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}")),
+                    slotsText,
                     $"₱{booking.TotalAmount:N2}"
                 );
             }
@@ -629,9 +635,6 @@ public class BookingService : IBookingService
         return MapToDto(booking, court.Name);
     }
 
-    // ═════════════════════════════════════════════════════════════
-    // ✅ RESCHEDULE — move a booking to a new court / date / time
-    // ═════════════════════════════════════════════════════════════
     public async Task<RescheduleBookingResponse> RescheduleBookingAsync(
         Guid id,
         RescheduleBookingRequest request,
@@ -650,7 +653,6 @@ public class BookingService : IBookingService
             throw new InvalidOperationException(
                 $"Cannot reschedule a booking that is already {booking.Status}");
 
-        // ── Target court (default: same) ─────────────────────────
         var targetCourtId = booking.CourtId;
         if (!string.IsNullOrWhiteSpace(request.CourtId))
         {
@@ -664,7 +666,6 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(c => c.Id == targetCourtId && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Target court not found");
 
-        // ── Target date (default: same) ──────────────────────────
         var targetDate = booking.Date;
         if (!string.IsNullOrWhiteSpace(request.Date))
         {
@@ -675,7 +676,6 @@ public class BookingService : IBookingService
 
         await EnsureWithinAdvanceWindowAsync(clientId, targetDate);
 
-        // ── Normalize + validate new slots ───────────────────────
         var newSlots = new List<(TimeOnly Start, TimeOnly End)>();
         foreach (var s in request.Slots)
         {
@@ -696,7 +696,6 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException("New slots overlap each other");
         }
 
-        // ── Within court hours ───────────────────────────────────
         var openHour = targetCourt.OpenTime.Hour;
         var closeHour = targetCourt.CloseTime.Hour == 0 ? 24 : targetCourt.CloseTime.Hour;
 
@@ -708,7 +707,6 @@ public class BookingService : IBookingService
                     $"{start:HH\\:mm}-{end:HH\\:mm} is outside this court's operating hours");
         }
 
-        // ── Conflict check (exclude this booking) ────────────────
         foreach (var (start, end) in ordered)
         {
             var conflicting = await _db.Bookings
@@ -730,7 +728,6 @@ public class BookingService : IBookingService
                     $"Time slot {start:HH\\:mm}-{end:HH\\:mm} is already booked on this court");
         }
 
-        // ── Blocked-date check ───────────────────────────────────
         var blocked = await _db.BlockedDates
             .Where(bd => bd.ClientId == clientId
                       && bd.Date == targetDate
@@ -753,12 +750,11 @@ public class BookingService : IBookingService
             }
         }
 
-        // ── Snapshot previous state ──────────────────────────────
         var previousSlots = booking.Slots
             .OrderBy(s => s.StartTime)
             .Select(s => new TimeSlotDto(
                 s.Id.ToString(),
-                s.CourtId.ToString(), // 👈 ADDED THIS LINE
+                s.CourtId.ToString(),
                 s.Date.ToString("yyyy-MM-dd"),
                 s.StartTime.ToString("HH:mm"),
                 s.EndTime.ToString("HH:mm"),
@@ -770,7 +766,6 @@ public class BookingService : IBookingService
         var previousCourtName = booking.Court?.Name ?? "";
         var previousAmount = booking.TotalAmount;
 
-        // ── Recompute total using pricing rules ──────────────────
         var dateOnly = DateOnly.FromDateTime(targetDate);
         decimal newTotal = 0m;
         var perSlotPrices = new List<decimal>();
@@ -784,7 +779,6 @@ public class BookingService : IBookingService
             newTotal += price;
         }
 
-        // ── Swap slots + update booking ──────────────────────────
         _db.TimeSlots.RemoveRange(booking.Slots);
 
         booking.Slots = ordered
@@ -817,7 +811,6 @@ public class BookingService : IBookingService
 
         await _db.SaveChangesAsync();
 
-        // ── Customer email (non-fatal) ───────────────────────────
         if (!string.IsNullOrWhiteSpace(booking.CustomerEmail))
         {
             try

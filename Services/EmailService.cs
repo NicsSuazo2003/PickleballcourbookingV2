@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿// Services/EmailService.cs
+using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 
 namespace PickleballBookingSystem.Services;
@@ -30,7 +31,6 @@ public class EmailService
     private const string SUCCESS = "#2ECC71";  // success
     private const string PURPLE = "#A78BFA";  // refund (no tailwind equivalent)
 
-    // ⭐ Hardcoded admin panel URL for the admin CTA button
     private const string ADMIN_URL = "https://centercourt-booking.vercel.app/admin";
 
     public EmailService(IConfiguration config, ILogger<EmailService> logger)
@@ -39,9 +39,7 @@ public class EmailService
         _logger = logger;
     }
 
-    // ═════════════════════════════════════════════════════════════
-    // ⏰ Time formatting — always output 12-hour AM/PM
-    // ═════════════════════════════════════════════════════════════
+    // ⏰ Time formatting
     private static string FormatTime(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
@@ -68,6 +66,30 @@ public class EmailService
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
 
+        // 👇 FIX: Handle multi-court strings like "Court 1: 07:00-08:00 | Court 2: 07:00-08:00"
+        if (input.Contains('|'))
+        {
+            return string.Join(" | ", input.Split('|').Select(part =>
+            {
+                var trimmed = part.Trim();
+                var lastColon = trimmed.LastIndexOf(':');
+
+                if (lastColon > 0)
+                {
+                    var courtName = trimmed.Substring(0, lastColon).Trim();
+                    var timeRange = trimmed.Substring(lastColon + 1).Trim();
+
+                    var parts = Regex.Split(timeRange, @"\s*[-–—]\s*");
+                    if (parts.Length == 2)
+                    {
+                        return $"{courtName}: {FormatTime(parts[0])} – {FormatTime(parts[1])}";
+                    }
+                }
+                return trimmed;
+            }));
+        }
+
+        // Original logic for single time ranges
         var parts = Regex.Split(input.Trim(), @"\s*[-–—]\s*");
         if (parts.Length == 2)
         {
@@ -89,9 +111,7 @@ public class EmailService
         return input;
     }
 
-    // ═════════════════════════════════════════════════════════════
     // 🎨 Shared layout — Forest Green theme
-    // ═════════════════════════════════════════════════════════════
     private static string WrapLayout(string bannerTitle, string contentHtml)
     {
         return $@"
@@ -497,54 +517,6 @@ public class EmailService
         }
     }
 
-
-
-    // ═════════════════════════════════════════════════════════════
-    // 🔧 Shared sender
-    // ═════════════════════════════════════════════════════════════
-    private async Task SendAsync(
-        string? apiKey,
-        string? senderEmail,
-        string? senderName,
-        string? toEmail,
-        string toName,
-        string subject,
-        string html)
-    {
-        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(senderEmail) || string.IsNullOrEmpty(toEmail))
-        {
-            _logger.LogWarning("Brevo config incomplete — skipping email {Subject}", subject);
-            return;
-        }
-
-        using var http = new HttpClient();
-
-        var payload = new
-        {
-            sender = new { email = senderEmail, name = senderName ?? "Center Court" },
-            to = new[] { new { email = toEmail, name = toName } },
-            subject,
-            htmlContent = html
-        };
-
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
-        {
-            Content = JsonContent.Create(payload)
-        };
-        request.Headers.Add("api-key", apiKey);
-
-        var response = await http.SendAsync(request);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            _logger.LogError("Brevo failed: {Status} {Body}", response.StatusCode, body);
-        }
-        else
-        {
-            _logger.LogInformation("Email sent → {To} ({Subject})", toEmail, subject);
-        }
-    }
     // ═════════════════════════════════════════════════════════════
     // 6. CUSTOMER — Booking Rescheduled
     // ═════════════════════════════════════════════════════════════
@@ -620,6 +592,53 @@ public class EmailService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Reschedule email notification failed");
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // 🔧 Shared sender
+    // ═════════════════════════════════════════════════════════════
+    private async Task SendAsync(
+        string? apiKey,
+        string? senderEmail,
+        string? senderName,
+        string? toEmail,
+        string toName,
+        string subject,
+        string html)
+    {
+        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(senderEmail) || string.IsNullOrEmpty(toEmail))
+        {
+            _logger.LogWarning("Brevo config incomplete — skipping email {Subject}", subject);
+            return;
+        }
+
+        using var http = new HttpClient();
+
+        var payload = new
+        {
+            sender = new { email = senderEmail, name = senderName ?? "Center Court" },
+            to = new[] { new { email = toEmail, name = toName } },
+            subject,
+            htmlContent = html
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Add("api-key", apiKey);
+
+        var response = await http.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Brevo failed: {Status} {Body}", response.StatusCode, body);
+        }
+        else
+        {
+            _logger.LogInformation("Email sent → {To} ({Subject})", toEmail, subject);
         }
     }
 }
