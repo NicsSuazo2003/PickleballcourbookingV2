@@ -36,7 +36,7 @@ public class BookingService : IBookingService
         }
     }
 
-    // 👇 ADDED: Input sanitization helper
+    // Input sanitization helper
     private static string SanitizeInput(string? input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
@@ -45,7 +45,7 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
     {
-        // 👇 ADDED: Strict backend validation to block test/troll bookings
+        // Strict backend validation to block test/troll bookings
         var lowerName = request.CustomerName?.Trim().ToLower() ?? "";
         var lowerEmail = request.CustomerEmail?.Trim().ToLower() ?? "";
 
@@ -177,14 +177,25 @@ public class BookingService : IBookingService
 
             try
             {
-                var courtIds = booking.Slots.Select(s => s.CourtId).Distinct();
-                var courts = await _db.Courts.Where(c => courtIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name);
+                // TimeSlot.CourtId is Guid?, so unwrap it to a plain Guid before using it as a dictionary key.
+                var courtIds = booking.Slots
+                    .Where(s => s.CourtId.HasValue)
+                    .Select(s => s.CourtId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                var courts = await _db.Courts
+                    .Where(c => courtIds.Contains(c.Id))
+                    .ToDictionaryAsync(c => c.Id, c => c.Name);
 
                 var slotsText = string.Join(" | ", booking.Slots
-                    .GroupBy(s => s.CourtId)
-                    .Select(g => {
+                    .Where(s => s.CourtId.HasValue)
+                    .GroupBy(s => s.CourtId!.Value)
+                    .Select(g =>
+                    {
                         var courtName = courts.TryGetValue(g.Key, out var name) ? name : "Court";
-                        var times = string.Join(", ", g.OrderBy(s => s.StartTime).Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"));
+                        var times = string.Join(", ", g.OrderBy(s => s.StartTime)
+                            .Select(s => $"{s.StartTime:HH:mm}-{s.EndTime:HH:mm}"));
                         return $"{courtName}: {times}";
                     }));
 
@@ -502,7 +513,8 @@ public class BookingService : IBookingService
             b.Date.ToString("yyyy-MM-dd"),
             b.Slots.Select(s => new TimeSlotDto(
                 s.Id.ToString(),
-                s.CourtId.ToString(),
+                // TimeSlot.CourtId is Guid?; fall back to the booking's court.
+                (s.CourtId ?? b.CourtId).ToString(),
                 s.Date.ToString("yyyy-MM-dd"),
                 s.StartTime.ToString("HH:mm"),
                 s.EndTime.ToString("HH:mm"),
@@ -785,11 +797,13 @@ public class BookingService : IBookingService
             }
         }
 
+        var previousBookingCourtId = booking.CourtId;
         var previousSlots = booking.Slots
             .OrderBy(s => s.StartTime)
             .Select(s => new TimeSlotDto(
                 s.Id.ToString(),
-                s.CourtId.ToString(),
+                // TimeSlot.CourtId is Guid?; fall back to the booking's court.
+                (s.CourtId ?? previousBookingCourtId).ToString(),
                 s.Date.ToString("yyyy-MM-dd"),
                 s.StartTime.ToString("HH:mm"),
                 s.EndTime.ToString("HH:mm"),
