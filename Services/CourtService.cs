@@ -116,25 +116,49 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
-        // ✅ Pull StartTime AND EndTime for every live slot on this court.
+        // ✅ Pull StartTime, EndTime, booking status and payment expiry
+        //    so we can distinguish "booked" from "pending payment".
         var bookedSlots = await _db.TimeSlots
             .Where(s => s.Date.Date == date.Date
-                     && s.CourtId == courtId // ✅ CHANGED THIS LINE
+                     && s.CourtId == courtId
                      && s.Booking.ClientId == clientId
                      && s.Booking.Id != (excludeBookingId ?? Guid.Empty)
                      && s.Booking.Status != "cancelled"
                      && s.Booking.Status != "expired"
                      && s.Booking.Status != "rejected"
                      && s.Booking.Status != "refunded")
-            .Select(s => new { s.StartTime, s.EndTime })
+            .Select(s => new
+            {
+                s.StartTime,
+                s.EndTime,
+                s.Booking.Status,
+                s.Booking.PaymentExpiresAt
+            })
             .ToListAsync();
 
         var bookedSet = new HashSet<int>();
+        // 👇 NEW: hour -> expiry (only populated for pending_payment)
+        var pendingExpiryByHour = new Dictionary<int, DateTime?>();
+
         foreach (var bs in bookedSlots)
         {
             var startH = bs.StartTime.Hour;
             var endH = bs.EndTime.Hour == 0 ? 24 : bs.EndTime.Hour;
-            for (int h = startH; h < endH; h++) bookedSet.Add(h);
+            for (int h = startH; h < endH; h++)
+            {
+                bookedSet.Add(h);
+
+                if (bs.Status == "pending_payment")
+                {
+                    // Keep the earliest expiry if multiple pending overlap
+                    if (!pendingExpiryByHour.TryGetValue(h, out var existing) ||
+                        (bs.PaymentExpiresAt.HasValue &&
+                         (!existing.HasValue || bs.PaymentExpiresAt < existing)))
+                    {
+                        pendingExpiryByHour[h] = bs.PaymentExpiresAt;
+                    }
+                }
+            }
         }
 
         var blockedDates = await _db.BlockedDates
@@ -192,13 +216,51 @@ public class CourtService : ICourtService
             var slotPrice = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, slotTime);
             var isPeak = slotPrice > court.PricePerHour;
 
+            // 👇 NEW: resolve a single status string for the frontend
+            string status;
+            DateTime? pendingExpiresAt = null;
+
+            if (isPast)
+            {
+                status = "past";
+            }
+            else if (isOpenPlayBlocked)
+            {
+                status = "open_play";
+            }
+            else if (isBlocked)
+            {
+                status = "blocked";
+            }
+            else if (isBooked)
+            {
+                if (pendingExpiryByHour.TryGetValue(h, out var exp) && exp.HasValue)
+                {
+                    status = "pending";
+                    pendingExpiresAt = exp;
+                }
+                else
+                {
+                    // payment_submitted / confirmed / completed
+                    status = "booked";
+                }
+            }
+            else
+            {
+                status = "available";
+            }
+
+            var isAvailable = status == "available";
+
             slots.Add(new TimeSlotAvailabilityDto(
                 $"slot-{courtId}-{date:yyyy-MM-dd}-{h}",
                 date.ToString("yyyy-MM-dd"),
                 startTime, endTime,
-                !isPast && !isBooked && !isBlocked && !isOpenPlayBlocked,
+                isAvailable,
                 slotPrice,
-                isPeak
+                isPeak,
+                status,
+                pendingExpiresAt
             ));
         }
 

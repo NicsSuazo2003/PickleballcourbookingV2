@@ -57,7 +57,9 @@ public record TimeSlotAvailabilityDto(
     string EndTime,
     bool IsAvailable,
     decimal Price,
-    bool IsPeak
+    bool IsPeak,
+    string Status,              // 👈 NEW: "available" | "booked" | "blocked" | "pending" | "open_play" | "past"
+    DateTime? PendingExpiresAt  // 👈 NEW: only set when Status == "pending"
 );
 
 public record BlockedDateDto(
