@@ -57,10 +57,8 @@ public class BookingController : ControllerBase
     {
         var clientId = await GetClientId();
         var booking = await _booking.TrackBookingAsync(referenceCode, email, clientId);
-        if (booking == null) return NotFound(new { message = "Booking not found" });
         return Ok(booking);
     }
-
     [HttpGet("track-summaries-by-email")]
     public async Task<ActionResult<List<BookingSummaryDto>>> TrackSummariesByEmail([FromQuery] string email)
     {

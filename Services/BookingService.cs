@@ -248,9 +248,10 @@ public class BookingService : IBookingService
             .Include(b => b.Court)
             .Where(b => b.ReferenceCode == referenceCode && b.ClientId == clientId);
 
-        if (!string.IsNullOrEmpty(email))
+        if (!string.IsNullOrWhiteSpace(email))
         {
-            query = query.Where(b => b.CustomerEmail == email);
+            var normalized = email.Trim().ToLowerInvariant();
+            query = query.Where(b => b.CustomerEmail.ToLower() == normalized);
         }
 
         var booking = await query.FirstOrDefaultAsync()
@@ -258,7 +259,6 @@ public class BookingService : IBookingService
 
         return MapToDto(booking, booking.Court?.Name ?? "");
     }
-
     public async Task<List<BookingDto>> GetBookingsAsync(Guid clientId, DateTime? fromDate = null, DateTime? toDate = null)
     {
         var query = _db.Bookings
