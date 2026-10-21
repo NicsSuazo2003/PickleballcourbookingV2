@@ -31,9 +31,14 @@ public class Client
         set => AvailableAmenitiesJson = JsonSerializer.Serialize(value);
     }
 
-    // ⭐ NEW — Maximum days ahead a customer can book.
+    // ⭐ Maximum days ahead a customer can book.
     // 0 = no limit. Default = 90 days (~3 months).
     public int MaxAdvanceBookingDays { get; set; } = 90;
+
+    // 👇 NEW — Master switch for CUSTOMER-FACING online bookings.
+    // false = landing page shows "closed" banner, CreateBookingAsync rejects.
+    // Staff manual bookings are NOT affected.
+    public bool BookingsEnabled { get; set; } = true;
 
     private DateTime _createdAt;
     public DateTime CreatedAt

@@ -65,5 +65,6 @@ public record UpdateClientSettingsRequest(
     string? GcashAccountName,
     object? PaymentMethods,
     List<AmenityItemDto>? AvailableAmenities,
-    int? MaxAdvanceBookingDays   // ⭐ NEW
+    int? MaxAdvanceBookingDays,      // ⭐ existing
+    bool? BookingsEnabled            // 👈 NEW — master customer-facing bookings switch
 );

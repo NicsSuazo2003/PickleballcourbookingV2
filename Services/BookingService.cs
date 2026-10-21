@@ -45,6 +45,20 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
     {
+        // 👇 NEW: reject CUSTOMER bookings when the client has closed online bookings.
+        // Staff-created bookings via /api/admin/bookings/manual use a different path
+        // (CreateStaffBookingAsync) and are unaffected. AdminOverride bypasses this guard
+        // for admin-driven calls through /api/bookings/admin-create.
+        if (!request.AdminOverride)
+        {
+            var bookingClient = await _db.Clients.FindAsync(clientId)
+                ?? throw new KeyNotFoundException("Client not found");
+
+            if (!bookingClient.BookingsEnabled)
+                throw new InvalidOperationException(
+                    "Online bookings are temporarily closed. Please contact the court directly.");
+        }
+
         // Strict backend validation to block test/troll bookings
         var lowerName = request.CustomerName?.Trim().ToLower() ?? "";
         var lowerEmail = request.CustomerEmail?.Trim().ToLower() ?? "";
@@ -248,10 +262,9 @@ public class BookingService : IBookingService
             .Include(b => b.Court)
             .Where(b => b.ReferenceCode == referenceCode && b.ClientId == clientId);
 
-        if (!string.IsNullOrWhiteSpace(email))
+        if (!string.IsNullOrEmpty(email))
         {
-            var normalized = email.Trim().ToLowerInvariant();
-            query = query.Where(b => b.CustomerEmail.ToLower() == normalized);
+            query = query.Where(b => b.CustomerEmail == email);
         }
 
         var booking = await query.FirstOrDefaultAsync()
@@ -259,6 +272,7 @@ public class BookingService : IBookingService
 
         return MapToDto(booking, booking.Court?.Name ?? "");
     }
+
     public async Task<List<BookingDto>> GetBookingsAsync(Guid clientId, DateTime? fromDate = null, DateTime? toDate = null)
     {
         var query = _db.Bookings
