@@ -17,7 +17,6 @@ public class Client
     [Column(TypeName = "jsonb")]
     public string? PaymentMethods { get; set; }
 
-    // ⭐ JSONB column. Stores [{ name, icon, description }, ...]
     [Column(TypeName = "jsonb")]
     public string? AvailableAmenitiesJson { get; set; }
 
@@ -31,13 +30,10 @@ public class Client
         set => AvailableAmenitiesJson = JsonSerializer.Serialize(value);
     }
 
-    // ⭐ Maximum days ahead a customer can book.
-    // 0 = no limit. Default = 90 days (~3 months).
     public int MaxAdvanceBookingDays { get; set; } = 90;
 
-    // 👇 NEW — Master switch for CUSTOMER-FACING online bookings.
-    // false = landing page shows "closed" banner, CreateBookingAsync rejects.
-    // Staff manual bookings are NOT affected.
+    // 👇 THE FIX — explicitly map to the snake_case DB column
+    [Column("bookings_enabled")]
     public bool BookingsEnabled { get; set; } = true;
 
     private DateTime _createdAt;
@@ -53,10 +49,9 @@ public class Client
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
 }
 
-// Nested amenity shape (stored in AvailableAmenitiesJson)
 public class AmenityItem
 {
     public string Name { get; set; } = string.Empty;
-    public string Icon { get; set; } = "Sparkles";  // Lucide icon key
-    public string? Description { get; set; }        // Landing-only subtitle
+    public string Icon { get; set; } = "Sparkles";
+    public string? Description { get; set; }
 }
