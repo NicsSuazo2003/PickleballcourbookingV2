@@ -6,30 +6,23 @@ namespace PickleballBookingSystem.Middleware;
 
 /// <summary>
 /// Resolves the tenant subdomain from the X-Client-Subdomain header or host,
-/// strictly validated against an allowlist configured in appsettings.json:
-///   "Clients": { "AllowedSubdomains": ["picklejoe", "sideout", ...] }
+/// strictly validated against an allowlist configured in appsettings.json.
 ///
-/// Runs as middleware. On each request:
-///   1. Resolves the subdomain
-///   2. Looks up the ClientId
-///   3. Stores it in HttpContext.Items["ClientId"] so downstream code
-///      (controllers, OnRejected handler, ExceptionMiddleware) can read it
-///      without re-querying.
+/// Runs as middleware ONLY. On each request it resolves ClientId and stores
+/// it in HttpContext.Items["ClientId"] and HttpContext.Items["Subdomain"].
+/// Controllers and middleware can read these directly.
 /// </summary>
 public class ClientResolver
 {
     private readonly RequestDelegate _next;
-    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly HashSet<string> _allowed;
     private readonly string? _defaultSubdomain;
 
-    public ClientResolver(
-        RequestDelegate next,
-        IHttpContextAccessor httpContextAccessor,
-        IConfiguration config)
+    private static readonly Dictionary<string, Guid> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+    public ClientResolver(RequestDelegate next, IConfiguration config)
     {
         _next = next;
-        _httpContextAccessor = httpContextAccessor;
 
         var list = config.GetSection("Clients:AllowedSubdomains").Get<string[]>()
                    ?? Array.Empty<string>();
@@ -46,52 +39,41 @@ public class ClientResolver
         {
             try
             {
-                // Resolve IClientService via RequestServices — middleware runs
-                // before the DI scope is guaranteed to be set up, so resolving
-                // via constructor is unsafe for scoped services.
-                var clientService = ctx.RequestServices.GetService<IClientService>();
-                if (clientService is not null)
+                if (_cache.TryGetValue(subdomain, out var cachedClientId))
                 {
-                    var clientId = await clientService.GetClientIdBySubdomainAsync(subdomain);
-                    ctx.Items["ClientId"] = clientId;
+                    ctx.Items["ClientId"] = cachedClientId;
                     ctx.Items["Subdomain"] = subdomain;
+                }
+                else
+                {
+                    var clientService = ctx.RequestServices.GetService<IClientService>();
+                    if (clientService is not null)
+                    {
+                        var clientId = await clientService.GetClientIdBySubdomainAsync(subdomain);
+                        _cache[subdomain] = clientId;
+                        ctx.Items["ClientId"] = clientId;
+                        ctx.Items["Subdomain"] = subdomain;
+                    }
                 }
             }
             catch
             {
-                // Don't fail the whole request if the client lookup fails —
-                // the controller will produce a 401 if it actually needs
-                // the client ID and it's missing.
+                // Swallow — controllers that need ClientId will 401 if missing.
             }
         }
 
         await _next(ctx);
     }
 
-    /// <summary>
-    /// Returns the validated subdomain for the current request, or null.
-    /// Controllers can still call this directly (same behaviour as before).
-    /// </summary>
-    public string? GetSubdomain()
+    // ── static helper — controllers can call this WITHOUT needing ClientResolver injected ──
+    public static string? ResolveSubdomain(HttpContext ctx, IConfiguration config)
     {
-        var ctx = _httpContextAccessor.HttpContext;
-        if (ctx is null) return null;
+        var allowed = config.GetSection("Clients:AllowedSubdomains").Get<string[]>()
+                      ?? Array.Empty<string>();
+        var defaultSub = config["Clients:DefaultSubdomain"];
 
-        // If middleware already resolved it, reuse it
-        if (ctx.Items["Subdomain"] is string cached && !string.IsNullOrEmpty(cached))
-            return cached;
-
-        return ResolveSubdomain(ctx);
-    }
-
-    // ── private helpers ─────────────────────────────────────
-
-    private string? ResolveSubdomain(HttpContext ctx)
-    {
-        // 1. Explicit header (frontend sends it)
         var fromHeader = ctx.Request.Headers["X-Client-Subdomain"].FirstOrDefault();
 
-        // 2. Fallback to host
         var candidate = fromHeader;
         if (string.IsNullOrWhiteSpace(candidate))
         {
@@ -104,7 +86,39 @@ public class ClientResolver
             }
         }
 
-        // 3. Fallback to configured default (dev / single-tenant prod)
+        if (string.IsNullOrWhiteSpace(candidate))
+            candidate = defaultSub;
+
+        if (string.IsNullOrWhiteSpace(candidate))
+            return null;
+
+        candidate = candidate.Trim().ToLowerInvariant();
+
+        var allowedSet = new HashSet<string>(allowed, StringComparer.OrdinalIgnoreCase);
+        return allowedSet.Contains(candidate) ? candidate : null;
+    }
+
+    private string? ResolveSubdomain(HttpContext ctx)
+    {
+        // Prefer the cached subdomain from middleware
+        if (ctx.Items["Subdomain"] is string cached && !string.IsNullOrEmpty(cached))
+            return cached;
+
+        // Same logic as static method — kept as private instance for use inside InvokeAsync
+        var fromHeader = ctx.Request.Headers["X-Client-Subdomain"].FirstOrDefault();
+
+        var candidate = fromHeader;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            var host = ctx.Request.Host.Host;
+            if (!string.IsNullOrEmpty(host))
+            {
+                var parts = host.Split('.');
+                if (parts.Length >= 2 && parts[0] != "www" && parts[0] != "localhost")
+                    candidate = parts[0];
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(candidate))
             candidate = _defaultSubdomain;
 
@@ -113,7 +127,6 @@ public class ClientResolver
 
         candidate = candidate.Trim().ToLowerInvariant();
 
-        // 4. Reject anything not on the allowlist
         return _allowed.Contains(candidate) ? candidate : null;
     }
 }

@@ -158,10 +158,9 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // ✅ Reject + log to security_events
+    // Reject + log to security_events
     options.OnRejected = async (ctx, token) =>
     {
-        // Log rate-limit event (non-blocking; failures must not 500 the request)
         try
         {
             var clientId = ctx.HttpContext.Items["ClientId"] as Guid?;
@@ -213,7 +212,8 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IOpenPlayService, OpenPlayService>();
 builder.Services.AddScoped<IPricingRuleService, PricingRuleService>();
-builder.Services.AddScoped<ClientResolver>();
+// ✅ ClientResolver is NOT registered here — it's middleware-only
+// and requires RequestDelegate, which DI cannot construct.
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddHostedService<ExpiredBookingWorker>();
 
@@ -283,7 +283,7 @@ _ = Task.Run(async () =>
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();
 
-// ✅ ClientResolver must run BEFORE UseRateLimiter so that
+// ClientResolver must run BEFORE UseRateLimiter so that
 // OnRejected can read HttpContext.Items["ClientId"]
 app.UseMiddleware<ClientResolver>();
 

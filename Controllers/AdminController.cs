@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;                    // ← NEW (for .ToListAsync)
-using PickleballBookingSystem.Data;                     // ← NEW (for AppDbContext)
+using Microsoft.EntityFrameworkCore;
+using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -15,34 +15,45 @@ public class AdminController : ControllerBase
     private readonly IAdminService _admin;
     private readonly IBookingService _booking;
     private readonly ICourtService _court;
-    private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IConfiguration _config;
     private readonly IPricingRuleService _pricingRuleService;
-    private readonly AppDbContext _db;                  // ← NEW
+    private readonly AppDbContext _db;
 
     public AdminController(
         IAdminService admin,
         IBookingService booking,
         ICourtService court,
-        ClientResolver clientResolver,
         IClientService clientService,
+        IConfiguration config,
         IPricingRuleService pricingRuleService,
-        AppDbContext db)                                // ← NEW
+        AppDbContext db)
     {
         _admin = admin;
         _booking = booking;
         _court = court;
-        _clientResolver = clientResolver;
         _clientService = clientService;
+        _config = config;
         _pricingRuleService = pricingRuleService;
-        _db = db;                                       // ← NEW
+        _db = db;
     }
 
+    /// <summary>
+    /// Fast path: middleware (ClientResolver) already resolved ClientId
+    /// and stored it in HttpContext.Items["ClientId"].
+    /// Slow path: resolve the subdomain ourselves and look up the client.
+    /// </summary>
     private async Task<Guid> GetClientId()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        // Fast path — set by ClientResolver middleware
+        if (HttpContext.Items["ClientId"] is Guid cached)
+            return cached;
+
+        // Slow path — use static helper (ClientResolver is not DI-injectable anymore)
+        var subdomain = ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
+
         return await _clientService.GetClientIdBySubdomainAsync(subdomain);
     }
 
@@ -66,7 +77,6 @@ public class AdminController : ControllerBase
         return Ok(bookings);
     }
 
-    // Staff may only set "confirmed" or "cancelled" — nothing financial.
     [HttpPut("bookings/{id}")]
     [Authorize(Roles = "admin,staff")]
     public async Task<ActionResult<BookingDto>> UpdateBooking(Guid id, AdminUpdateBookingRequest request)
@@ -90,7 +100,6 @@ public class AdminController : ControllerBase
     {
         var role = User.FindFirstValue(ClaimTypes.Role);
 
-        // Only admins can override price
         if (role != "admin")
             request = request with { TotalAmount = null };
 
@@ -175,9 +184,16 @@ public class AdminController : ControllerBase
     [Authorize(Roles = "admin")]
     public async Task<ActionResult<ClientAdminDto>> GetSettings()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        // Fast path — subdomain resolved by middleware
+        var subdomain = HttpContext.Items["Subdomain"] as string;
+
+        // Slow path — resolve manually
+        if (string.IsNullOrEmpty(subdomain))
+            subdomain = ClientResolver.ResolveSubdomain(HttpContext, _config);
+
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
+
         var client = await _clientService.GetClientAdminBySubdomainAsync(subdomain);
         return Ok(client);
     }
