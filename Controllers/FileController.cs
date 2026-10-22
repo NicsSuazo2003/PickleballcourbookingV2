@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -20,8 +21,8 @@ public class FileController : ControllerBase
     {
         ("image/jpeg", ".jpg",  new byte[] { 0xFF, 0xD8, 0xFF }),
         ("image/png",  ".png",  new byte[] { 0x89, 0x50, 0x4E, 0x47 }),
-        ("image/webp", ".webp", new byte[] { 0x52, 0x49, 0x46, 0x46 }),   // "RIFF"
-        ("image/gif",  ".gif",  new byte[] { 0x47, 0x49, 0x46, 0x38 }),    // "GIF8"
+        ("image/webp", ".webp", new byte[] { 0x52, 0x49, 0x46, 0x46 }),
+        ("image/gif",  ".gif",  new byte[] { 0x47, 0x49, 0x46, 0x38 }),
     };
 
     private static readonly Regex SafeFileNameRegex =
@@ -30,23 +31,21 @@ public class FileController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpFactory;
     private readonly IClientService _clientService;
-    private readonly ClientResolver _clientResolver;
 
     public FileController(
         IConfiguration config,
         IHttpClientFactory httpFactory,
-        IClientService clientService,
-        ClientResolver clientResolver)
+        IClientService clientService)
     {
         _config = config;
         _httpFactory = httpFactory;
         _clientService = clientService;
-        _clientResolver = clientResolver;
     }
 
     private async Task<Guid> GetClientIdAsync()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
@@ -74,7 +73,6 @@ public class FileController : ControllerBase
         if (file.Length > MaxFileBytes)
             return BadRequest(new { message = "File must be under 5 MB" });
 
-        // 🔒 Magic-byte validation — do not trust Content-Type or extension
         using var stream = file.OpenReadStream();
         var header = new byte[8];
         var read = await stream.ReadAsync(header.AsMemory(0, 8));
@@ -92,7 +90,6 @@ public class FileController : ControllerBase
 
         var clientId = await GetClientIdAsync();
 
-        // 🔒 Derive filename from the DETECTED type, never the client's input
         var fileName = $"{Guid.NewGuid():N}{matched.Ext}";
         var objectPath = $"{clientId}/{fileName}";
 
@@ -112,15 +109,11 @@ public class FileController : ControllerBase
             Content = content
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", supabaseKey);
-        // Prevent overwrite if a GUID ever collides
         request.Headers.Add("x-upsert", "false");
 
         using var response = await http.SendAsync(request);
         if (!response.IsSuccessStatusCode)
-        {
-            // Log the status but don't leak Supabase internals to the caller
             return BadRequest(new { message = "Upload failed" });
-        }
 
         var url = $"{supabaseUrl}/storage/v1/object/public/{Bucket}/{objectPath}";
         return Ok(new { url });
@@ -141,7 +134,6 @@ public class FileController : ControllerBase
         var supabaseKey = _config["Supabase:Key"]
             ?? throw new InvalidOperationException("Supabase:Key not configured");
 
-        // 🔒 Parse and verify the URL belongs to OUR bucket
         Uri parsed;
         try { parsed = new Uri(request.Url); }
         catch { return BadRequest(new { message = "Invalid URL" }); }
@@ -151,7 +143,6 @@ public class FileController : ControllerBase
         if (!request.Url.StartsWith(expectedPrefix, StringComparison.Ordinal))
             return BadRequest(new { message = "URL does not belong to this bucket" });
 
-        // 🔒 Extract path after the bucket and validate strict shape: "{clientId}/{guid}.{ext}"
         var relative = request.Url[expectedPrefix.Length..];
         var slashIdx = relative.IndexOf('/');
         if (slashIdx <= 0)
@@ -166,7 +157,6 @@ public class FileController : ControllerBase
         if (!SafeFileNameRegex.IsMatch(fileName))
             return BadRequest(new { message = "Invalid file name" });
 
-        // 🔒 Caller can only delete files in their own tenant's folder
         var callerClientId = await GetClientIdAsync();
         if (callerClientId != pathClientId)
             return Forbid();

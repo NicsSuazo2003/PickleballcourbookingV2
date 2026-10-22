@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -10,19 +11,23 @@ namespace PickleballBookingSystem.Controllers;
 public class PriceRulesController : ControllerBase
 {
     private readonly ICourtService _courtService;
-    private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IConfiguration _config;
 
-    public PriceRulesController(ICourtService courtService, ClientResolver clientResolver, IClientService clientService)
+    public PriceRulesController(
+        ICourtService courtService,
+        IClientService clientService,
+        IConfiguration config)
     {
         _courtService = courtService;
-        _clientResolver = clientResolver;
         _clientService = clientService;
+        _config = config;
     }
 
     private async Task<Guid> GetClientId()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 

@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -11,22 +12,23 @@ namespace PickleballBookingSystem.Controllers;
 public class CourtController : ControllerBase
 {
     private readonly ICourtService _court;
-    private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IConfiguration _config;
 
     public CourtController(
         ICourtService court,
-        ClientResolver clientResolver,
-        IClientService clientService)
+        IClientService clientService,
+        IConfiguration config)
     {
         _court = court;
-        _clientResolver = clientResolver;
         _clientService = clientService;
+        _config = config;
     }
 
     private async Task<Guid> GetClientId()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
@@ -116,7 +118,6 @@ public class CourtController : ControllerBase
         return NoContent();
     }
 
-    // Admin: tenant-wide blocked dates (not court-specific)
     [Authorize(Roles = "admin")]
     [HttpGet("blocked-dates")]
     public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDatesAll()
@@ -151,7 +152,6 @@ public class CourtController : ControllerBase
     {
         var clientId = await GetClientId();
         var rule = await _court.CreatePriceRuleAsync(request, clientId);
-        // Fixed: CreatedAtAction needs route values, not the DTO as route values
         return CreatedAtAction(nameof(GetPriceRules), new { }, rule);
     }
 

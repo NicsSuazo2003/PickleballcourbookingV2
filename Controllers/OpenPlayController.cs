@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -11,22 +12,23 @@ namespace PickleballBookingSystem.Controllers;
 public class OpenPlayController : ControllerBase
 {
     private readonly IOpenPlayService _openPlay;
-    private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IConfiguration _config;
 
     public OpenPlayController(
         IOpenPlayService openPlay,
-        ClientResolver clientResolver,
-        IClientService clientService)
+        IClientService clientService,
+        IConfiguration config)
     {
         _openPlay = openPlay;
-        _clientResolver = clientResolver;
         _clientService = clientService;
+        _config = config;
     }
 
     private async Task<Guid> GetClientId()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 

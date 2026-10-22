@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -11,12 +12,14 @@ namespace PickleballBookingSystem.Controllers;
 public class ClientController : ControllerBase
 {
     private readonly IClientService _clientService;
-    private readonly ClientResolver _clientResolver;
+    private readonly IConfiguration _config;
 
-    public ClientController(IClientService clientService, ClientResolver clientResolver)
+    public ClientController(
+        IClientService clientService,
+        IConfiguration config)
     {
         _clientService = clientService;
-        _clientResolver = clientResolver;
+        _config = config;
     }
 
     /// <summary>
@@ -34,7 +37,9 @@ public class ClientController : ControllerBase
         NoStore = false)]
     public async Task<ActionResult<ClientPublicDto>> GetPublicSettings()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
+
         if (string.IsNullOrWhiteSpace(subdomain))
             return NotFound(new { message = "Client not found" });
 

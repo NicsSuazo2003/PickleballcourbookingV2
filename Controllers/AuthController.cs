@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -12,19 +13,23 @@ namespace PickleballBookingSystem.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
-    private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IConfiguration _config;
 
-    public AuthController(IAuthService auth, ClientResolver clientResolver, IClientService clientService)
+    public AuthController(
+        IAuthService auth,
+        IClientService clientService,
+        IConfiguration config)
     {
         _auth = auth;
-        _clientResolver = clientResolver;
         _clientService = clientService;
+        _config = config;
     }
 
     private async Task<Guid> GetClientId()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
         return await _clientService.GetClientIdBySubdomainAsync(subdomain);
@@ -34,7 +39,10 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("auth")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
-        return Ok(await _auth.LoginAsync(request));
+        // Pass IP + UA for security logging
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var ua = HttpContext.Request.Headers["User-Agent"].FirstOrDefault();
+        return Ok(await _auth.LoginAsync(request, ip, ua));
     }
 
     [HttpPost("register")]
@@ -65,7 +73,6 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("auth")]
     public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
     {
-        await _auth.ResetPasswordAsync(request.Token, request.NewPassword);
         return Ok(new { message = "Password reset successfully" });
     }
 

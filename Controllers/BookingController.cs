@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -16,32 +17,30 @@ public class BookingController : ControllerBase
     {
         ("image/jpeg", new byte[] { 0xFF, 0xD8, 0xFF }),
         ("image/png",  new byte[] { 0x89, 0x50, 0x4E, 0x47 }),
-        ("image/webp", new byte[] { 0x52, 0x49, 0x46, 0x46 }), // RIFF....WEBP
+        ("image/webp", new byte[] { 0x52, 0x49, 0x46, 0x46 }),
     };
 
     private readonly IBookingService _booking;
     private readonly IConfiguration _config;
-    private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
     private readonly IHttpClientFactory _httpFactory;
 
     public BookingController(
         IBookingService booking,
         IConfiguration config,
-        ClientResolver clientResolver,
         IClientService clientService,
         IHttpClientFactory httpFactory)
     {
         _booking = booking;
         _config = config;
-        _clientResolver = clientResolver;
         _clientService = clientService;
         _httpFactory = httpFactory;
     }
 
     private async Task<Guid> GetClientId()
     {
-        var subdomain = _clientResolver.GetSubdomain();
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
 
@@ -60,7 +59,9 @@ public class BookingController : ControllerBase
     public async Task<ActionResult<BookingDto>> Create(CreateBookingRequest request)
     {
         var clientId = await GetClientId();
-        var booking = await _booking.CreateBookingAsync(request, clientId);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var ua = HttpContext.Request.Headers["User-Agent"].FirstOrDefault();
+        var booking = await _booking.CreateBookingAsync(request, clientId, ip, ua);
         return CreatedAtAction(nameof(Track), new { referenceCode = booking.ReferenceCode }, booking);
     }
 
@@ -87,7 +88,7 @@ public class BookingController : ControllerBase
 
     [HttpPost("{id}/upload-payment")]
     [EnableRateLimiting("upload")]
-    [RequestSizeLimit(MaxScreenshotBytes + 1024)]        // 5 MB + small form overhead
+    [RequestSizeLimit(MaxScreenshotBytes + 1024)]
     public async Task<ActionResult<BookingDto>> UploadPayment(
         Guid id,
         [FromForm] string paymentReference,
@@ -107,7 +108,6 @@ public class BookingController : ControllerBase
             if (screenshot.Length > MaxScreenshotBytes)
                 return BadRequest(new { message = "Screenshot must be under 5 MB." });
 
-            // Magic-byte validation — do NOT trust ContentType or extension
             using var stream = screenshot.OpenReadStream();
             var header = new byte[4];
             var read = await stream.ReadAsync(header.AsMemory(0, 4));
@@ -187,7 +187,9 @@ public class BookingController : ControllerBase
     {
         var clientId = await GetClientId();
         request = request with { AdminOverride = true };
-        var booking = await _booking.CreateBookingAsync(request, clientId);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var ua = HttpContext.Request.Headers["User-Agent"].FirstOrDefault();
+        var booking = await _booking.CreateBookingAsync(request, clientId, ip, ua);
         return Ok(booking);
     }
 }
