@@ -183,6 +183,11 @@ builder.Services.AddScoped<ClientResolver>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddHostedService<ExpiredBookingWorker>();
 
+// Security logging
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ISecurityLogger, SecurityLogger>();
+builder.Services.AddHostedService<SecurityRetentionWorker>();
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHealthChecks();

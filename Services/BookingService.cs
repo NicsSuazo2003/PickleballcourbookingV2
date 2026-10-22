@@ -14,15 +14,21 @@ public class BookingService : IBookingService
     private readonly AppDbContext _db;
     private readonly EmailService _email;
     private readonly IPricingRuleService _pricingRuleService;
+    private readonly ISecurityLogger _security;
 
     private const int MaxSlotHours = 6;
     private const int MaxSlotsPerBooking = 12;
 
-    public BookingService(AppDbContext db, EmailService email, IPricingRuleService pricingRuleService)
+    public BookingService(
+        AppDbContext db,
+        EmailService email,
+        IPricingRuleService pricingRuleService,
+        ISecurityLogger security)
     {
         _db = db;
         _email = email;
         _pricingRuleService = pricingRuleService;
+        _security = security;
     }
 
     // ── helpers ─────────────────────────────────────────────
@@ -60,7 +66,11 @@ public class BookingService : IBookingService
     // ═══════════════════════════════════════════════════════
     // CREATE
     // ═══════════════════════════════════════════════════════
-    public async Task<BookingDto> CreateBookingAsync(CreateBookingRequest request, Guid clientId)
+    public async Task<BookingDto> CreateBookingAsync(
+        CreateBookingRequest request,
+        Guid clientId,
+        string? ipAddress = null,
+        string? userAgent = null)
     {
         if (!request.AdminOverride)
         {
@@ -113,7 +123,8 @@ public class BookingService : IBookingService
         {
             try
             {
-                return await CreateInnerAsync(request, clientId, bookingDate, name, email, phone);
+                return await CreateInnerAsync(
+                    request, clientId, bookingDate, name, email, phone, ipAddress, userAgent);
             }
             catch (DbUpdateException ex) when (IsSerializationFailure(ex) && attempt < 2)
             {
@@ -131,7 +142,9 @@ public class BookingService : IBookingService
         DateTime bookingDate,
         string name,
         string email,
-        string phone)
+        string phone,
+        string? ipAddress,
+        string? userAgent)
     {
         using var transaction = await _db.Database.BeginTransactionAsync(
             System.Data.IsolationLevel.Serializable);
@@ -243,6 +256,25 @@ public class BookingService : IBookingService
             _db.Bookings.Add(booking);
             await _db.SaveChangesAsync();
             await transaction.CommitAsync();
+
+            // ✅ Security log — after commit, so the booking definitely exists
+            await _security.LogAsync(new SecurityEvent
+            {
+                ClientId = clientId,
+                IpHash = _security.HashIp(ipAddress),
+                IpAddress = ipAddress,
+                UserAgent = userAgent,
+                EventType = "booking.created",
+                Severity = "info",
+                Resource = $"booking:{booking.Id}",
+                Message = $"Booking {booking.ReferenceCode} created",
+                Metadata = new
+                {
+                    referenceCode = booking.ReferenceCode,
+                    slotCount = booking.Slots?.Count ?? 0,
+                    totalAmount = booking.TotalAmount,
+                },
+            });
 
             // Fire-and-forget admin notification
             try
@@ -359,7 +391,14 @@ public class BookingService : IBookingService
     // ═══════════════════════════════════════════════════════
     // UPDATE STATUS
     // ═══════════════════════════════════════════════════════
-    public async Task<BookingDto> UpdateBookingStatusAsync(Guid id, string status, Guid clientId)
+    public async Task<BookingDto> UpdateBookingStatusAsync(
+        Guid id,
+        string status,
+        Guid clientId,
+        Guid? actorUserId = null,
+        string? actorEmail = null,
+        string? actorIp = null,
+        string? actorUA = null)
     {
         var booking = await _db.Bookings
             .Include(b => b.Slots)
@@ -368,8 +407,37 @@ public class BookingService : IBookingService
             ?? throw new KeyNotFoundException("Booking not found");
 
         var previousStatus = booking.Status;
+        if (previousStatus == status)
+        {
+            // No-op — don't log or send email
+            return MapToDto(booking, booking.Court?.Name ?? "");
+        }
+
         booking.Status = status;
         await _db.SaveChangesAsync();
+
+        // ✅ Security log — after save, using captured previousStatus
+        await _security.LogAsync(new SecurityEvent
+        {
+            ClientId = booking.ClientId,
+            ActorUserId = actorUserId,
+            ActorEmail = actorEmail,
+            IpHash = _security.HashIp(actorIp),
+            IpAddress = actorIp,
+            UserAgent = actorUA,
+            EventType = "booking.status_changed",
+            Severity = (status is "refunded" or "rejected" or "cancelled")
+                ? "warning"
+                : "info",
+            Resource = $"booking:{booking.Id}",
+            Message = $"Booking {booking.ReferenceCode}: {previousStatus} → {status}",
+            Metadata = new
+            {
+                referenceCode = booking.ReferenceCode,
+                from = previousStatus,
+                to = status,
+            },
+        });
 
         await SendStatusChangeEmailAsync(booking, previousStatus);
         return MapToDto(booking, booking.Court?.Name ?? "");
@@ -822,6 +890,8 @@ public class BookingService : IBookingService
             delta < 0 ? -delta : 0m);
     }
 
+    // ═══════════════════════════════════════════════════════
+    // SUMMARY BY EMAIL
     // ═══════════════════════════════════════════════════════
     // SUMMARY BY EMAIL
     // ═══════════════════════════════════════════════════════

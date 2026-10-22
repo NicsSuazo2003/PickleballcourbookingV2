@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>();
     public DbSet<OpenPlaySessionCourt> OpenPlaySessionCourts => Set<OpenPlaySessionCourt>();
     public DbSet<PricingRule> PricingRules => Set<PricingRule>();
+    public DbSet<SecurityEventEntity> SecurityEvents => Set<SecurityEventEntity>();   // ✅ NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -69,7 +70,6 @@ public class AppDbContext : DbContext
             e.Property(c => c.CreatedAt).HasColumnName("created_at");
             e.Property(c => c.Status).HasColumnName("status");
 
-            // Cascade from client: courts and bookings belong to the tenant
             e.HasMany(c => c.Courts)
                 .WithOne(crt => crt.Client)
                 .HasForeignKey(crt => crt.ClientId)
@@ -94,8 +94,6 @@ public class AppDbContext : DbContext
         // ── Court ──
         modelBuilder.Entity<Court>(e =>
         {
-            // 🔒 RESTRICT — you cannot delete a court that has bookings.
-            // Force soft-delete (Status = "archived") instead.
             e.HasMany(c => c.Bookings)
                 .WithOne(b => b.Court)
                 .HasForeignKey(b => b.CourtId)
@@ -134,7 +132,6 @@ public class AppDbContext : DbContext
                 .HasForeignKey(s => s.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Redundant with the Court block above, but explicit is safer
             e.HasOne(b => b.Court)
                 .WithMany(c => c.Bookings)
                 .HasForeignKey(b => b.CourtId)
@@ -154,7 +151,6 @@ public class AppDbContext : DbContext
 
             e.Property(b => b.Date).HasConversion(new DateTimeToUtcConverter());
 
-            // Unique reference code
             e.HasIndex(b => b.ReferenceCode).IsUnique();
         });
 
@@ -173,8 +169,6 @@ public class AppDbContext : DbContext
 
             e.Property(ts => ts.Date).HasConversion(new DateTimeToUtcConverter());
 
-            // Prevent double-booking: same court/date/start cannot exist twice
-            // Use a filtered index (CourtId IS NOT NULL) to allow court-deleted orphans.
             e.HasIndex(ts => new { ts.CourtId, ts.Date, ts.StartTime })
                 .IsUnique()
                 .HasFilter("\"CourtId\" IS NOT NULL");
@@ -268,6 +262,19 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(sc => sc.CourtId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── SecurityEvent ──
+        modelBuilder.Entity<SecurityEventEntity>(e =>
+        {
+            e.ToTable("security_events");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Metadata).HasColumnType("jsonb");
+            e.Property(x => x.IpAddress).HasColumnType("inet");
+            e.HasIndex(x => new { x.ClientId, x.OccurredAt })
+                .HasDatabaseName("ix_secevents_client_time");
+            e.HasIndex(x => new { x.ClientId, x.EventType, x.OccurredAt })
+                .HasDatabaseName("ix_secevents_type_time");
         });
     }
 

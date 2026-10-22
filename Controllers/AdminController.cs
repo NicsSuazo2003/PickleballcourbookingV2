@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;                    // ← NEW (for .ToListAsync)
+using PickleballBookingSystem.Data;                     // ← NEW (for AppDbContext)
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -16,6 +18,7 @@ public class AdminController : ControllerBase
     private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
     private readonly IPricingRuleService _pricingRuleService;
+    private readonly AppDbContext _db;                  // ← NEW
 
     public AdminController(
         IAdminService admin,
@@ -23,7 +26,8 @@ public class AdminController : ControllerBase
         ICourtService court,
         ClientResolver clientResolver,
         IClientService clientService,
-        IPricingRuleService pricingRuleService)
+        IPricingRuleService pricingRuleService,
+        AppDbContext db)                                // ← NEW
     {
         _admin = admin;
         _booking = booking;
@@ -31,6 +35,7 @@ public class AdminController : ControllerBase
         _clientResolver = clientResolver;
         _clientService = clientService;
         _pricingRuleService = pricingRuleService;
+        _db = db;                                       // ← NEW
     }
 
     private async Task<Guid> GetClientId()
@@ -260,5 +265,45 @@ public class AdminController : ControllerBase
         var clientId = await GetClientId();
         await _pricingRuleService.DeleteRuleAsync(ruleId, clientId);
         return NoContent();
+    }
+
+    // ========================================
+    // SECURITY LOGS
+    // ========================================
+
+    [HttpGet("security-events")]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<List<SecurityEventDto>>> GetSecurityEvents(
+        [FromQuery] string? severity,
+        [FromQuery] string? eventType,
+        [FromQuery] int limit = 100)
+    {
+        var clientId = await GetClientId();
+        var q = _db.SecurityEvents
+            .Where(e => e.ClientId == clientId)
+            .OrderByDescending(e => e.OccurredAt)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(severity))
+            q = q.Where(e => e.Severity == severity);
+        if (!string.IsNullOrWhiteSpace(eventType))
+            q = q.Where(e => e.EventType == eventType);
+
+        var events = await q
+            .Take(Math.Min(limit, 500))
+            .Select(e => new SecurityEventDto(
+                e.Id.ToString(),
+                e.OccurredAt,
+                e.EventType,
+                e.Severity,
+                e.Message,
+                e.ActorEmail,
+                e.IpHash,
+                e.Resource,
+                e.Success,
+                e.ErrorCode))
+            .ToListAsync();
+
+        return Ok(events);
     }
 }

@@ -15,6 +15,7 @@ public class AuthService : IAuthService
     private readonly TokenService _tokenService;
     private readonly EmailService _email;
     private readonly ILogger<AuthService> _logger;
+    private readonly ISecurityLogger _security;   // ✅ NEW
 
     private const int ResetTokenExpiryMinutes = 60;
     private const int MaxFailedAttempts = 10;
@@ -25,51 +26,74 @@ public class AuthService : IAuthService
     private static readonly string DummyHash =
         "$2a$12$C6UzMDM.H6dfI/f/IKcEeO1QPR6SxT9jVqUoD3m7Y0aJ1yZ9bK9j2";
 
-    public AuthService(AppDbContext db, TokenService tokenService, EmailService email, ILogger<AuthService> logger)
+    public AuthService(
+        AppDbContext db,
+        TokenService tokenService,
+        EmailService email,
+        ILogger<AuthService> logger,
+        ISecurityLogger security)   // ✅ NEW
     {
         _db = db;
         _tokenService = tokenService;
         _email = email;
         _logger = logger;
+        _security = security;   // ✅ NEW
     }
 
     private static string NormalizeEmail(string? email) => (email ?? "").Trim().ToLowerInvariant();
 
-    public async Task<AuthResponse> LoginAsync(LoginRequest request)
+    public async Task<AuthResponse> LoginAsync(LoginRequest request, string? ip = null, string? ua = null)
     {
-        var email = NormalizeEmail(request.Email);
-        if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(request.Password))
-            throw new UnauthorizedAccessException("Invalid email or password");
-
+        var email = (request.Email ?? "").Trim().ToLowerInvariant();
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email);
 
-        // Always perform a bcrypt verify so login timing is constant.
-        string hashToCheck = user?.PasswordHash ?? DummyHash;
-        bool passwordOk;
-        try { passwordOk = BCrypt.Net.BCrypt.Verify(request.Password, hashToCheck); }
-        catch { passwordOk = false; }
-
-        if (user is null || !passwordOk)
+        if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash ?? DummyHash))
         {
-            if (user is not null)
+            await _security.LogAsync(new SecurityEvent
             {
-                user.FailedLoginCount += 1;
-                if (user.FailedLoginCount >= MaxFailedAttempts)
-                    user.LockoutUntil = DateTime.UtcNow.AddMinutes(LockoutMinutes);
-                try { await _db.SaveChangesAsync(); } catch { }
-            }
-            throw new UnauthorizedAccessException("Invalid email or password");
+                ClientId = user?.ClientId ?? Guid.Empty,
+                ActorEmail = email,
+                IpHash = _security.HashIp(ip),
+                IpAddress = ip,
+                UserAgent = ua,
+                EventType = "auth.login_failed",
+                Severity = "warning",
+                Message = $"Failed login for {email}",
+                Success = false,
+            });
+            throw new UnauthorizedAccessException("Invalid email or password.");
         }
 
-        if (user.LockoutUntil is { } until && until > DateTime.UtcNow)
-            throw new UnauthorizedAccessException("Too many failed attempts. Please try again later.");
+        if (user.LockoutUntil > DateTime.UtcNow)
+        {
+            await _security.LogAsync(new SecurityEvent
+            {
+                ClientId = user.ClientId,
+                ActorUserId = user.Id,
+                ActorEmail = email,
+                IpHash = _security.HashIp(ip),
+                IpAddress = ip,
+                UserAgent = ua,
+                EventType = "auth.login_locked_out",
+                Severity = "warning",
+                Message = $"Login on locked account: {email}",
+                Success = false,
+            });
+            throw new UnauthorizedAccessException("Too many failed attempts. Try again later.");
+        }
 
-        if (user.Status == "suspended")
-            throw new UnauthorizedAccessException("Account is suspended");
-
-        user.FailedLoginCount = 0;
-        user.LockoutUntil = null;
-        await _db.SaveChangesAsync();
+        await _security.LogAsync(new SecurityEvent
+        {
+            ClientId = user.ClientId,
+            ActorUserId = user.Id,
+            ActorEmail = email,
+            IpHash = _security.HashIp(ip),
+            IpAddress = ip,
+            UserAgent = ua,
+            EventType = "auth.login_success",
+            Severity = "info",
+            Message = $"Login succeeded: {email}",
+        });
 
         return new AuthResponse(_tokenService.GenerateToken(user), MapToDto(user));
     }
