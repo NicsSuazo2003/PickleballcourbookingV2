@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting; // 👈 ADDED
+using Microsoft.AspNetCore.RateLimiting;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -10,21 +10,33 @@ namespace PickleballBookingSystem.Controllers;
 [ApiController, Route("api/bookings")]
 public class BookingController : ControllerBase
 {
+    private const long MaxScreenshotBytes = 5 * 1024 * 1024;
+
+    private static readonly (string Mime, byte[] Magic)[] AllowedImageSignatures = new[]
+    {
+        ("image/jpeg", new byte[] { 0xFF, 0xD8, 0xFF }),
+        ("image/png",  new byte[] { 0x89, 0x50, 0x4E, 0x47 }),
+        ("image/webp", new byte[] { 0x52, 0x49, 0x46, 0x46 }), // RIFF....WEBP
+    };
+
     private readonly IBookingService _booking;
     private readonly IConfiguration _config;
     private readonly ClientResolver _clientResolver;
     private readonly IClientService _clientService;
+    private readonly IHttpClientFactory _httpFactory;
 
     public BookingController(
         IBookingService booking,
         IConfiguration config,
         ClientResolver clientResolver,
-        IClientService clientService)
+        IClientService clientService,
+        IHttpClientFactory httpFactory)
     {
         _booking = booking;
         _config = config;
         _clientResolver = clientResolver;
         _clientService = clientService;
+        _httpFactory = httpFactory;
     }
 
     private async Task<Guid> GetClientId()
@@ -39,12 +51,12 @@ public class BookingController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            throw new UnauthorizedAccessException($"Client not found for subdomain: {subdomain}");
+            throw new UnauthorizedAccessException("Client not found for this request.");
         }
     }
 
     [HttpPost]
-    [EnableRateLimiting("booking")] // 👈 ADDED
+    [EnableRateLimiting("booking")]
     public async Task<ActionResult<BookingDto>> Create(CreateBookingRequest request)
     {
         var clientId = await GetClientId();
@@ -53,13 +65,16 @@ public class BookingController : ControllerBase
     }
 
     [HttpGet("track/{referenceCode}")]
+    [EnableRateLimiting("track")]
     public async Task<ActionResult<BookingDto>> Track(string referenceCode, [FromQuery] string? email)
     {
         var clientId = await GetClientId();
         var booking = await _booking.TrackBookingAsync(referenceCode, email, clientId);
         return Ok(booking);
     }
+
     [HttpGet("track-summaries-by-email")]
+    [EnableRateLimiting("track")]
     public async Task<ActionResult<List<BookingSummaryDto>>> TrackSummariesByEmail([FromQuery] string email)
     {
         if (string.IsNullOrWhiteSpace(email))
@@ -71,6 +86,8 @@ public class BookingController : ControllerBase
     }
 
     [HttpPost("{id}/upload-payment")]
+    [EnableRateLimiting("upload")]
+    [RequestSizeLimit(MaxScreenshotBytes + 1024)]        // 5 MB + small form overhead
     public async Task<ActionResult<BookingDto>> UploadPayment(
         Guid id,
         [FromForm] string paymentReference,
@@ -79,29 +96,61 @@ public class BookingController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(paymentReference))
             return BadRequest(new { message = "Payment reference is required" });
+        if (paymentReference.Trim().Length > 64)
+            return BadRequest(new { message = "Payment reference is too long" });
 
         var clientId = await GetClientId();
         string? screenshotUrl = null;
 
-        if (screenshot != null && screenshot.Length > 0)
+        if (screenshot is { Length: > 0 })
         {
-            var supabaseUrl = _config["Supabase:Url"]!;
-            var supabaseKey = _config["Supabase:Key"]!;
-            var fileName = $"payment-{Guid.NewGuid()}{Path.GetExtension(screenshot.FileName)}";
+            if (screenshot.Length > MaxScreenshotBytes)
+                return BadRequest(new { message = "Screenshot must be under 5 MB." });
 
-            using var content = new StreamContent(screenshot.OpenReadStream());
-            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(screenshot.ContentType);
+            // Magic-byte validation — do NOT trust ContentType or extension
+            using var stream = screenshot.OpenReadStream();
+            var header = new byte[4];
+            var read = await stream.ReadAsync(header.AsMemory(0, 4));
+            if (read < 4)
+                return BadRequest(new { message = "Screenshot is not a valid image." });
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post,
+            var matched = Array.Find(AllowedImageSignatures, a =>
+                a.Magic.Length <= read &&
+                header.AsSpan(0, a.Magic.Length).SequenceEqual(a.Magic));
+
+            if (matched.Mime is null)
+                return BadRequest(new { message = "Only JPG, PNG, or WEBP screenshots are accepted." });
+
+            stream.Position = 0;
+
+            var supabaseUrl = _config["Supabase:Url"]
+                ?? throw new InvalidOperationException("Supabase:Url not configured");
+            var supabaseKey = _config["Supabase:Key"]
+                ?? throw new InvalidOperationException("Supabase:Key not configured");
+
+            var ext = matched.Mime switch
+            {
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                _ => ".jpg",
+            };
+            var fileName = $"payment-{Guid.NewGuid():N}{ext}";
+
+            var client = _httpFactory.CreateClient("supabase");
+            using var content = new StreamContent(stream);
+            content.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue(matched.Mime);
+
+            using var req = new HttpRequestMessage(HttpMethod.Post,
                 $"{supabaseUrl}/storage/v1/object/PickleImgs/{fileName}")
             {
                 Content = content
             };
-            httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", supabaseKey);
+            req.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", supabaseKey);
 
-            var http = new HttpClient();
-            var response = await http.SendAsync(httpRequest);
-            if (!response.IsSuccessStatusCode)
+            using var resp = await client.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
                 return BadRequest(new { message = "Screenshot upload failed" });
 
             screenshotUrl = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
@@ -110,18 +159,18 @@ public class BookingController : ControllerBase
         var booking = await _booking.UploadPaymentScreenshotAsync(
             id,
             screenshotUrl,
-            paymentReference,
+            paymentReference.Trim(),
             paymentMethod,
             clientId);
 
         return Ok(booking);
     }
 
-    [Authorize(Roles = "admin"), HttpGet("admin")]
-    public async Task<ActionResult<List<BookingDto>>> GetAll()
+    [Authorize(Roles = "admin,staff"), HttpGet("admin")]
+    public async Task<ActionResult<List<BookingDto>>> GetAll([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var clientId = await GetClientId();
-        var bookings = await _booking.GetAllBookingsAsync(clientId);
+        var bookings = await _booking.GetBookingsAsync(clientId, from, to);
         return Ok(bookings);
     }
 

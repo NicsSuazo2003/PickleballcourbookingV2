@@ -20,19 +20,36 @@ public class Client
     [Column(TypeName = "jsonb")]
     public string? AvailableAmenitiesJson { get; set; }
 
+    /// <summary>
+    /// Deserialized view of AvailableAmenitiesJson. Never throws — malformed
+    /// JSON in the DB is treated as "no amenities" rather than a 500.
+    /// </summary>
     [NotMapped]
     public List<AmenityItem> AvailableAmenities
     {
-        get => string.IsNullOrEmpty(AvailableAmenitiesJson)
-            ? new List<AmenityItem>()
-            : JsonSerializer.Deserialize<List<AmenityItem>>(AvailableAmenitiesJson)
-              ?? new List<AmenityItem>();
-        set => AvailableAmenitiesJson = JsonSerializer.Serialize(value);
+        get
+        {
+            if (string.IsNullOrWhiteSpace(AvailableAmenitiesJson))
+                return new List<AmenityItem>();
+            try
+            {
+                var list = JsonSerializer.Deserialize<List<AmenityItem>>(AvailableAmenitiesJson);
+                return list?.Where(a => !string.IsNullOrEmpty(a.Name)).ToList()
+                       ?? new List<AmenityItem>();
+            }
+            catch (JsonException)
+            {
+                // Corrupt JSON — return empty rather than crash the public site.
+                return new List<AmenityItem>();
+            }
+        }
+        set => AvailableAmenitiesJson = value is null || value.Count == 0
+            ? null
+            : JsonSerializer.Serialize(value);
     }
 
     public int MaxAdvanceBookingDays { get; set; } = 90;
 
-    // 👇 THE FIX — explicitly map to the snake_case DB column
     [Column("bookings_enabled")]
     public bool BookingsEnabled { get; set; } = true;
 

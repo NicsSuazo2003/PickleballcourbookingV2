@@ -4,22 +4,15 @@ namespace PickleballBookingSystem.Interfaces;
 
 public interface IClientService
 {
-    Task<ClientDto> GetClientBySubdomainAsync(string subdomain);
-    Task<Guid> GetClientIdBySubdomainAsync(string subdomain);
-    Task<ClientDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request);
-}
+    // 🔒 PUBLIC — returns only customer-safe fields; strips internal payment config
+    Task<ClientPublicDto> GetClientPublicBySubdomainAsync(string subdomain);
 
-public record ClientDto(
-    string Id,
-    string Name,
-    string Subdomain,
-    string? LogoUrl,
-    string PrimaryColor,
-    string AccentColor,
-    string? GcashNumber,
-    string? GcashAccountName,
-    object? PaymentMethods,
-    List<AmenityItemDto> AvailableAmenities,
-    int MaxAdvanceBookingDays,
-    bool BookingsEnabled          // 👈 NEW
-);
+    // 🔒 ADMIN — returns full settings including PaymentMethods config
+    Task<ClientAdminDto> GetClientAdminBySubdomainAsync(string subdomain);
+
+    // Used everywhere internally to resolve tenant
+    Task<Guid> GetClientIdBySubdomainAsync(string subdomain);
+
+    // Admin-only write
+    Task<ClientAdminDto> UpdateClientSettingsAsync(Guid clientId, UpdateClientSettingsRequest request);
+}

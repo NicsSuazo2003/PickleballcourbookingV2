@@ -1,5 +1,11 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Net.Http.Headers;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using PickleballBookingSystem.DTOs;
+using PickleballBookingSystem.Interfaces;
+using PickleballBookingSystem.Middleware;
 
 namespace PickleballBookingSystem.Controllers;
 
@@ -7,66 +13,180 @@ namespace PickleballBookingSystem.Controllers;
 [Authorize(Roles = "admin")]
 public class FileController : ControllerBase
 {
-    private readonly IConfiguration _config;
-    private readonly HttpClient _http;
+    private const long MaxFileBytes = 5 * 1024 * 1024;
+    private const string Bucket = "PickleImgs";
 
-    public FileController(IConfiguration config, HttpClient http)
+    private static readonly (string Mime, string Ext, byte[] Magic)[] AllowedImages = new[]
+    {
+        ("image/jpeg", ".jpg",  new byte[] { 0xFF, 0xD8, 0xFF }),
+        ("image/png",  ".png",  new byte[] { 0x89, 0x50, 0x4E, 0x47 }),
+        ("image/webp", ".webp", new byte[] { 0x52, 0x49, 0x46, 0x46 }),   // "RIFF"
+        ("image/gif",  ".gif",  new byte[] { 0x47, 0x49, 0x46, 0x38 }),    // "GIF8"
+    };
+
+    private static readonly Regex SafeFileNameRegex =
+        new(@"^[0-9a-f]{32}\.(?:jpg|png|webp|gif)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly IClientService _clientService;
+    private readonly ClientResolver _clientResolver;
+
+    public FileController(
+        IConfiguration config,
+        IHttpClientFactory httpFactory,
+        IClientService clientService,
+        ClientResolver clientResolver)
     {
         _config = config;
-        _http = http;
+        _httpFactory = httpFactory;
+        _clientService = clientService;
+        _clientResolver = clientResolver;
     }
 
+    private async Task<Guid> GetClientIdAsync()
+    {
+        var subdomain = _clientResolver.GetSubdomain();
+        if (string.IsNullOrEmpty(subdomain))
+            throw new UnauthorizedAccessException("Client identification required");
+
+        try
+        {
+            return await _clientService.GetClientIdBySubdomainAsync(subdomain);
+        }
+        catch (KeyNotFoundException)
+        {
+            throw new UnauthorizedAccessException("Client not found");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // UPLOAD
+    // ═══════════════════════════════════════════════════════
     [HttpPost("upload")]
-    public async Task<IActionResult> Upload(IFormFile file)
+    [EnableRateLimiting("upload")]
+    [RequestSizeLimit(MaxFileBytes + 1024)]
+    public async Task<IActionResult> Upload(IFormFile? file)
     {
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "No file provided" });
 
-        var allowedTypes = new[] { "image/jpeg", "image/png", "image/webp", "image/gif" };
-        if (!allowedTypes.Contains(file.ContentType))
+        if (file.Length > MaxFileBytes)
+            return BadRequest(new { message = "File must be under 5 MB" });
+
+        // 🔒 Magic-byte validation — do not trust Content-Type or extension
+        using var stream = file.OpenReadStream();
+        var header = new byte[8];
+        var read = await stream.ReadAsync(header.AsMemory(0, 8));
+        if (read < 4)
+            return BadRequest(new { message = "File is not a valid image" });
+
+        var matched = Array.Find(AllowedImages, a =>
+            a.Magic.Length <= read &&
+            header.AsSpan(0, a.Magic.Length).SequenceEqual(a.Magic));
+
+        if (matched.Mime is null)
             return BadRequest(new { message = "Only JPEG, PNG, WebP, and GIF are allowed" });
 
-        if (file.Length > 5 * 1024 * 1024)
-            return BadRequest(new { message = "File must be under 5MB" });
+        stream.Position = 0;
 
-        var supabaseUrl = _config["Supabase:Url"]!;
-        var supabaseKey = _config["Supabase:Key"]!;
-        var fileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
+        var clientId = await GetClientIdAsync();
 
-        using var content = new StreamContent(file.OpenReadStream());
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(file.ContentType);
+        // 🔒 Derive filename from the DETECTED type, never the client's input
+        var fileName = $"{Guid.NewGuid():N}{matched.Ext}";
+        var objectPath = $"{clientId}/{fileName}";
 
-        var request = new HttpRequestMessage(HttpMethod.Post,
-            $"{supabaseUrl}/storage/v1/object/PickleImgs/{fileName}")
+        var supabaseUrl = _config["Supabase:Url"]
+            ?? throw new InvalidOperationException("Supabase:Url not configured");
+        var supabaseKey = _config["Supabase:Key"]
+            ?? throw new InvalidOperationException("Supabase:Key not configured");
+
+        var http = _httpFactory.CreateClient("supabase");
+
+        using var content = new StreamContent(stream);
+        content.Headers.ContentType = new MediaTypeHeaderValue(matched.Mime);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"{supabaseUrl}/storage/v1/object/{Bucket}/{objectPath}")
         {
             Content = content
         };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", supabaseKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", supabaseKey);
+        // Prevent overwrite if a GUID ever collides
+        request.Headers.Add("x-upsert", "false");
 
-        var response = await _http.SendAsync(request);
+        using var response = await http.SendAsync(request);
         if (!response.IsSuccessStatusCode)
+        {
+            // Log the status but don't leak Supabase internals to the caller
             return BadRequest(new { message = "Upload failed" });
+        }
 
-        var url = $"{supabaseUrl}/storage/v1/object/public/PickleImgs/{fileName}";
+        var url = $"{supabaseUrl}/storage/v1/object/public/{Bucket}/{objectPath}";
         return Ok(new { url });
     }
 
+    // ═══════════════════════════════════════════════════════
+    // DELETE
+    // ═══════════════════════════════════════════════════════
     [HttpDelete]
+    [EnableRateLimiting("upload")]
     public async Task<IActionResult> Delete([FromBody] DeleteFileRequest request)
     {
-        if (string.IsNullOrEmpty(request.Url)) return BadRequest();
+        if (request is null || string.IsNullOrWhiteSpace(request.Url))
+            return BadRequest(new { message = "Url is required" });
 
-        var supabaseUrl = _config["Supabase:Url"]!;
-        var supabaseKey = _config["Supabase:Key"]!;
-        var fileName = Path.GetFileName(new Uri(request.Url).AbsolutePath);
+        var supabaseUrl = _config["Supabase:Url"]
+            ?? throw new InvalidOperationException("Supabase:Url not configured");
+        var supabaseKey = _config["Supabase:Key"]
+            ?? throw new InvalidOperationException("Supabase:Key not configured");
 
-        var httpRequest = new HttpRequestMessage(HttpMethod.Delete,
-            $"{supabaseUrl}/storage/v1/object/PickleImgs/{fileName}");
-        httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", supabaseKey);
+        // 🔒 Parse and verify the URL belongs to OUR bucket
+        Uri parsed;
+        try { parsed = new Uri(request.Url); }
+        catch { return BadRequest(new { message = "Invalid URL" }); }
 
-        await _http.SendAsync(httpRequest);
-        return Ok(new { message = "File deleted" });
+        var expectedPrefix =
+            $"{supabaseUrl.TrimEnd('/')}/storage/v1/object/public/{Bucket}/";
+        if (!request.Url.StartsWith(expectedPrefix, StringComparison.Ordinal))
+            return BadRequest(new { message = "URL does not belong to this bucket" });
+
+        // 🔒 Extract path after the bucket and validate strict shape: "{clientId}/{guid}.{ext}"
+        var relative = request.Url[expectedPrefix.Length..];
+        var slashIdx = relative.IndexOf('/');
+        if (slashIdx <= 0)
+            return BadRequest(new { message = "Invalid file path" });
+
+        var pathClientIdStr = relative[..slashIdx];
+        var fileName = relative[(slashIdx + 1)..];
+
+        if (!Guid.TryParse(pathClientIdStr, out var pathClientId))
+            return BadRequest(new { message = "Invalid file path" });
+
+        if (!SafeFileNameRegex.IsMatch(fileName))
+            return BadRequest(new { message = "Invalid file name" });
+
+        // 🔒 Caller can only delete files in their own tenant's folder
+        var callerClientId = await GetClientIdAsync();
+        if (callerClientId != pathClientId)
+            return Forbid();
+
+        var objectPath = $"{pathClientIdStr}/{fileName}";
+        var http = _httpFactory.CreateClient("supabase");
+
+        using var requestDel = new HttpRequestMessage(HttpMethod.Delete,
+            $"{supabaseUrl}/storage/v1/object/{Bucket}/{objectPath}");
+        requestDel.Headers.Authorization = new AuthenticationHeaderValue("Bearer", supabaseKey);
+
+        using var resp = await http.SendAsync(requestDel);
+
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return NotFound(new { message = "File not found" });
+
+        if (!resp.IsSuccessStatusCode)
+            return StatusCode(StatusCodes.Status502BadGateway,
+                new { message = "Failed to delete file" });
+
+        return NoContent();
     }
 }
-
-public record DeleteFileRequest(string Url);

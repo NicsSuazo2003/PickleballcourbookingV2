@@ -4,11 +4,10 @@ public class BlockedDate
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    // ✅ Link to Court (optional - null means all courts)
+    // null → blocks ALL courts on that date (tenant-wide maintenance)
     public Guid? CourtId { get; set; }
     public Court? Court { get; set; }
 
-    // ✅ FIX: Ensure Date is always UTC
     private DateTime _date;
     public DateTime Date
     {
@@ -16,11 +15,11 @@ public class BlockedDate
         set => _date = DateTime.SpecifyKind(value, DateTimeKind.Utc);
     }
 
+    // null → blocks the entire day (StartTime == null is the day-block sentinel)
     public TimeOnly? StartTime { get; set; }
     public TimeOnly? EndTime { get; set; }
     public string? Reason { get; set; }
 
-    // ✅ FIX: Ensure CreatedAt is always UTC
     private DateTime _createdAt;
     public DateTime CreatedAt
     {
@@ -29,7 +28,5 @@ public class BlockedDate
     }
 
     public Guid ClientId { get; set; }
-
-    // ✅ FIX: Make Client nullable so EF Core doesn't try to insert a new Client
     public Client? Client { get; set; }
 }

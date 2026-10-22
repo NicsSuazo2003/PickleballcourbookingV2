@@ -1,7 +1,7 @@
-﻿// Controllers/AuthController.cs
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Interfaces;
 using PickleballBookingSystem.Middleware;
@@ -27,23 +27,22 @@ public class AuthController : ControllerBase
         var subdomain = _clientResolver.GetSubdomain();
         if (string.IsNullOrEmpty(subdomain))
             throw new UnauthorizedAccessException("Client identification required");
-
         return await _clientService.GetClientIdBySubdomainAsync(subdomain);
     }
 
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
-        var response = await _auth.LoginAsync(request);
-        return Ok(response);
+        return Ok(await _auth.LoginAsync(request));
     }
 
     [HttpPost("register")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
     {
         var clientId = await GetClientId();
-        var response = await _auth.RegisterAsync(request, clientId);
-        return Ok(response);
+        return Ok(await _auth.RegisterAsync(request, clientId));
     }
 
     [HttpPost("register-staff")]
@@ -51,23 +50,30 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<AuthResponse>> RegisterStaff(RegisterRequest request)
     {
         var clientId = await GetClientId();
-        var response = await _auth.RegisterStaffAsync(request, clientId);
-        return Ok(response);
+        return Ok(await _auth.RegisterStaffAsync(request, clientId));
     }
 
     [HttpPost("forgot-password")]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
     {
         await _auth.ForgotPasswordAsync(request.Email);
         return Ok(new { message = "If an account exists, a reset link has been sent" });
     }
 
+    [HttpPost("reset-password")]
+    [EnableRateLimiting("auth")]
+    public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
+    {
+        await _auth.ResetPasswordAsync(request.Token, request.NewPassword);
+        return Ok(new { message = "Password reset successfully" });
+    }
+
     [Authorize, HttpPut("profile")]
     public async Task<ActionResult<UserDto>> UpdateProfile(UpdateProfileRequest request)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var user = await _auth.UpdateProfileAsync(userId, request);
-        return Ok(user);
+        return Ok(await _auth.UpdateProfileAsync(userId, request));
     }
 
     [Authorize, HttpPut("change-password")]

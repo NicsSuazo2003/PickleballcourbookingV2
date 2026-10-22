@@ -1,4 +1,3 @@
-// Services/PricingRuleService.cs
 using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
@@ -9,9 +8,18 @@ namespace PickleballBookingSystem.Services;
 
 public class PricingRuleService : IPricingRuleService
 {
-    private readonly AppDbContext _db;
+    private const decimal MaxPrice = 100_000m;
+    private const int MaxLabelLength = 80;
+    private const int MaxPriority = 1000;
 
-    public PricingRuleService(AppDbContext db) => _db = db;
+    private readonly AppDbContext _db;
+    private readonly ILogger<PricingRuleService> _logger;
+
+    public PricingRuleService(AppDbContext db, ILogger<PricingRuleService> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
 
     public async Task<List<PricingRuleDto>> GetRulesAsync(Guid courtId, Guid clientId)
     {
@@ -37,14 +45,22 @@ public class PricingRuleService : IPricingRuleService
         if (court is null)
             throw new UnauthorizedAccessException("Court not found for this client");
 
+        if (string.IsNullOrWhiteSpace(request.Label) || request.Label.Length > MaxLabelLength)
+            throw new ArgumentException("Invalid rule label.");
+
         if (!TryParseTime(request.StartTime, out var start))
             throw new ArgumentException("Invalid StartTime");
         if (!TryParseTime(request.EndTime, out var end))
             throw new ArgumentException("Invalid EndTime");
 
-        // 👇 FIX: Allow 00:00 (Midnight) as a valid end time
         if (end != TimeOnly.MinValue && end <= start)
             throw new ArgumentException("EndTime must be after StartTime");
+
+        if (request.PricePerHour < 0 || request.PricePerHour > MaxPrice)
+            throw new ArgumentException($"Price per hour must be between 0 and {MaxPrice:N0}.");
+
+        if (request.Priority < 0 || request.Priority > MaxPriority)
+            throw new ArgumentException($"Priority must be between 0 and {MaxPriority}.");
 
         var rule = new PricingRule
         {
@@ -72,14 +88,22 @@ public class PricingRuleService : IPricingRuleService
         if (rule is null || rule.Court?.ClientId != clientId)
             throw new UnauthorizedAccessException("Rule not found for this client");
 
+        if (string.IsNullOrWhiteSpace(request.Label) || request.Label.Length > MaxLabelLength)
+            throw new ArgumentException("Invalid rule label.");
+
         if (!TryParseTime(request.StartTime, out var start))
             throw new ArgumentException("Invalid StartTime");
         if (!TryParseTime(request.EndTime, out var end))
             throw new ArgumentException("Invalid EndTime");
 
-        // 👇 FIX: Allow 00:00 (Midnight) as a valid end time
         if (end != TimeOnly.MinValue && end <= start)
             throw new ArgumentException("EndTime must be after StartTime");
+
+        if (request.PricePerHour < 0 || request.PricePerHour > MaxPrice)
+            throw new ArgumentException($"Price per hour must be between 0 and {MaxPrice:N0}.");
+
+        if (request.Priority < 0 || request.Priority > MaxPriority)
+            throw new ArgumentException($"Priority must be between 0 and {MaxPriority}.");
 
         rule.Label = request.Label.Trim();
         rule.Days = NormalizeDays(request.Days);
@@ -117,6 +141,9 @@ public class PricingRuleService : IPricingRuleService
 
     public decimal ResolvePriceFromCourt(Court court, DateOnly date, TimeOnly startTime)
     {
+        // Safety: never return a negative price even if a bad rule slipped through
+        decimal Clamp(decimal v) => v < 0m ? 0m : v > MaxPrice ? MaxPrice : v;
+
         if (court.PricingRules is { Count: > 0 })
         {
             var dayKey = DayKey(date.DayOfWeek);
@@ -124,21 +151,19 @@ public class PricingRuleService : IPricingRuleService
             var match = court.PricingRules
                 .Where(r =>
                     (string.IsNullOrWhiteSpace(r.Days) ||
-                     r.Days
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                     r.Days.Split(',', StringSplitOptions.RemoveEmptyEntries)
                         .Select(d => d.Trim().ToLowerInvariant())
                         .Contains(dayKey)) &&
                     startTime >= r.StartTime &&
-                    // 👇 FIX: If EndTime is 00:00, treat it as the end of the day (always true)
                     (r.EndTime == TimeOnly.MinValue || startTime < r.EndTime))
                 .OrderByDescending(r => r.Priority)
                 .ThenBy(r => r.StartTime)
                 .FirstOrDefault();
 
-            if (match is not null) return match.PricePerHour;
+            if (match is not null) return Clamp(match.PricePerHour);
         }
 
-        return court.PricePerHour;
+        return Clamp(court.PricePerHour);
     }
 
     private static PricingRuleDto ToDto(PricingRule r) => new()

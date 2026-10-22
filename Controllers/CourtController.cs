@@ -34,23 +34,21 @@ public class CourtController : ControllerBase
     }
 
     // ========================================
-    // ✅ PUBLIC ENDPOINTS
+    // PUBLIC ENDPOINTS
     // ========================================
 
     [HttpGet]
     public async Task<ActionResult<List<CourtDto>>> GetAllCourts()
     {
         var clientId = await GetClientId();
-        var courts = await _court.GetAllCourtsAsync(clientId);
-        return Ok(courts);
+        return Ok(await _court.GetAllCourtsAsync(clientId));
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<CourtDto>> GetCourt(Guid id)
     {
         var clientId = await GetClientId();
-        var court = await _court.GetCourtByIdAsync(id, clientId);
-        return Ok(court);
+        return Ok(await _court.GetCourtByIdAsync(id, clientId));
     }
 
     [HttpGet("{id}/availability")]
@@ -60,20 +58,18 @@ public class CourtController : ControllerBase
         [FromQuery] Guid? excludeBookingId = null)
     {
         var clientId = await GetClientId();
-        var slots = await _court.GetCourtAvailabilityAsync(id, date, clientId, excludeBookingId);
-        return Ok(slots);
+        return Ok(await _court.GetCourtAvailabilityAsync(id, date, clientId, excludeBookingId));
     }
 
     [HttpGet("{id}/blocked-dates")]
     public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDates(Guid id)
     {
         var clientId = await GetClientId();
-        var blockedDates = await _court.GetBlockedDatesAsync(id, clientId);
-        return Ok(blockedDates);
+        return Ok(await _court.GetBlockedDatesAsync(id, clientId));
     }
 
     // ========================================
-    // ✅ ADMIN ENDPOINTS
+    // ADMIN ENDPOINTS
     // ========================================
 
     [Authorize(Roles = "admin")]
@@ -90,8 +86,7 @@ public class CourtController : ControllerBase
     public async Task<ActionResult<CourtDto>> UpdateCourt(Guid id, UpdateCourtRequest request)
     {
         var clientId = await GetClientId();
-        var court = await _court.UpdateCourtAsync(id, request, clientId);
-        return Ok(court);
+        return Ok(await _court.UpdateCourtAsync(id, request, clientId));
     }
 
     [Authorize(Roles = "admin")]
@@ -109,7 +104,6 @@ public class CourtController : ControllerBase
     {
         var clientId = await GetClientId();
         var result = await _court.AddBlockedDateAsync(request, id, clientId);
-        // Changed to Ok() to prevent CreatedAtAction routing issues
         return Ok(result);
     }
 
@@ -122,43 +116,18 @@ public class CourtController : ControllerBase
         return NoContent();
     }
 
-    // ========================================
-    // ⚠️ DEPRECATED - Single Court Endpoints
-    // ========================================
-
-    [HttpGet("legacy")]
-    public async Task<ActionResult<CourtDto>> GetCourtLegacy()
-    {
-        var court = await _court.GetCourtAsync();
-        return Ok(court);
-    }
-
-    [HttpGet("legacy/availability")]
-    public async Task<ActionResult<List<TimeSlotAvailabilityDto>>> GetAvailabilityLegacy([FromQuery] DateTime date)
-    {
-        var slots = await _court.GetAvailabilityAsync(date);
-        return Ok(slots);
-    }
-
+    // Admin: tenant-wide blocked dates (not court-specific)
     [Authorize(Roles = "admin")]
-    [HttpPut("legacy/settings")]
-    public async Task<ActionResult<CourtDto>> UpdateSettingsLegacy(UpdateCourtRequest request)
-    {
-        var court = await _court.UpdateCourtSettingsAsync(request);
-        return Ok(court);
-    }
-
-    [Authorize(Roles = "admin")]
-    [HttpGet("legacy/blocked-dates")]
-    public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDatesLegacy()
+    [HttpGet("blocked-dates")]
+    public async Task<ActionResult<List<BlockedDateDto>>> GetBlockedDatesAll()
     {
         var clientId = await GetClientId();
         return Ok(await _court.GetBlockedDatesAsync(null, clientId));
     }
 
     [Authorize(Roles = "admin")]
-    [HttpPost("legacy/blocked-dates")]
-    public async Task<ActionResult<BlockedDateDto>> AddBlockedDateLegacy(CreateBlockedDateRequest request)
+    [HttpPost("blocked-dates")]
+    public async Task<ActionResult<BlockedDateDto>> AddBlockedDateAll(CreateBlockedDateRequest request)
     {
         var clientId = await GetClientId();
         var result = await _court.AddBlockedDateAsync(request, null, clientId);
@@ -166,15 +135,14 @@ public class CourtController : ControllerBase
     }
 
     // ========================================
-    // ✅ PRICE RULES ENDPOINTS
+    // PRICE RULES ENDPOINTS
     // ========================================
 
     [HttpGet("price-rules")]
     public async Task<ActionResult<List<PriceRuleDto>>> GetPriceRules()
     {
         var clientId = await GetClientId();
-        var rules = await _court.GetPriceRulesAsync(clientId);
-        return Ok(rules);
+        return Ok(await _court.GetPriceRulesAsync(clientId));
     }
 
     [Authorize(Roles = "admin")]
@@ -183,7 +151,8 @@ public class CourtController : ControllerBase
     {
         var clientId = await GetClientId();
         var rule = await _court.CreatePriceRuleAsync(request, clientId);
-        return CreatedAtAction(nameof(GetPriceRules), rule);
+        // Fixed: CreatedAtAction needs route values, not the DTO as route values
+        return CreatedAtAction(nameof(GetPriceRules), new { }, rule);
     }
 
     [Authorize(Roles = "admin")]
@@ -191,8 +160,7 @@ public class CourtController : ControllerBase
     public async Task<ActionResult<PriceRuleDto>> UpdatePriceRule(Guid id, UpdatePriceRuleRequest request)
     {
         var clientId = await GetClientId();
-        var rule = await _court.UpdatePriceRuleAsync(id, request, clientId);
-        return Ok(rule);
+        return Ok(await _court.UpdatePriceRuleAsync(id, request, clientId));
     }
 
     [Authorize(Roles = "admin")]

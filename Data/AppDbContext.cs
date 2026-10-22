@@ -22,16 +22,15 @@ public class AppDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Configure DateTime to use UTC
         ConfigureDateTimeUtc(modelBuilder);
 
-        // Table names genuinely all-lowercase in Supabase
+        // All lowercase table names
         foreach (var entity in modelBuilder.Model.GetEntityTypes())
         {
             entity.SetTableName(entity.GetTableName()!.ToLower());
         }
 
-        // ── User configuration ──
+        // ── User ──
         modelBuilder.Entity<User>(e =>
         {
             e.HasIndex(u => u.Email).IsUnique();
@@ -43,7 +42,7 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ── Client entity ──
+        // ── Client ──
         modelBuilder.Entity<Client>(e =>
         {
             e.Property(c => c.Id).HasColumnName("id");
@@ -54,6 +53,7 @@ public class AppDbContext : DbContext
             e.Property(c => c.AccentColor).HasColumnName("accent_color");
             e.Property(c => c.GcashNumber).HasColumnName("gcash_number");
             e.Property(c => c.GcashAccountName).HasColumnName("gcash_account_name");
+
             e.Property(c => c.PaymentMethods)
                 .HasColumnName("payment_methods")
                 .HasColumnType("jsonb");
@@ -69,6 +69,7 @@ public class AppDbContext : DbContext
             e.Property(c => c.CreatedAt).HasColumnName("created_at");
             e.Property(c => c.Status).HasColumnName("status");
 
+            // Cascade from client: courts and bookings belong to the tenant
             e.HasMany(c => c.Courts)
                 .WithOne(crt => crt.Client)
                 .HasForeignKey(crt => crt.ClientId)
@@ -85,24 +86,28 @@ public class AppDbContext : DbContext
         {
             e.HasIndex(r => r.CourtId);
             e.HasOne(r => r.Court)
-             .WithMany(c => c.PricingRules)
-             .HasForeignKey(r => r.CourtId)
-             .OnDelete(DeleteBehavior.Cascade);
+                .WithMany(c => c.PricingRules)
+                .HasForeignKey(r => r.CourtId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ── Court ──
         modelBuilder.Entity<Court>(e =>
         {
+            // 🔒 RESTRICT — you cannot delete a court that has bookings.
+            // Force soft-delete (Status = "archived") instead.
             e.HasMany(c => c.Bookings)
                 .WithOne(b => b.Court)
                 .HasForeignKey(b => b.CourtId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
 
             e.Property(c => c.ClientId).HasColumnName("client_id");
             e.HasOne(c => c.Client)
                 .WithMany(cl => cl.Courts)
                 .HasForeignKey(c => c.ClientId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(c => new { c.ClientId, c.Status });
         });
 
         modelBuilder.Entity<Court>(e =>
@@ -129,10 +134,11 @@ public class AppDbContext : DbContext
                 .HasForeignKey(s => s.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Redundant with the Court block above, but explicit is safer
             e.HasOne(b => b.Court)
                 .WithMany(c => c.Bookings)
                 .HasForeignKey(b => b.CourtId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
 
             e.Property(b => b.ClientId).HasColumnName("client_id");
             e.HasOne(b => b.Client)
@@ -146,8 +152,10 @@ public class AppDbContext : DbContext
                 .HasForeignKey(b => b.OpenPlaySessionId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            e.Property(b => b.Date)
-                .HasConversion(new DateTimeToUtcConverter());
+            e.Property(b => b.Date).HasConversion(new DateTimeToUtcConverter());
+
+            // Unique reference code
+            e.HasIndex(b => b.ReferenceCode).IsUnique();
         });
 
         // ── TimeSlot ──
@@ -163,16 +171,20 @@ public class AppDbContext : DbContext
                 .HasForeignKey(ts => ts.CourtId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            e.Property(ts => ts.Date)
-                .HasConversion(new DateTimeToUtcConverter());
+            e.Property(ts => ts.Date).HasConversion(new DateTimeToUtcConverter());
+
+            // Prevent double-booking: same court/date/start cannot exist twice
+            // Use a filtered index (CourtId IS NOT NULL) to allow court-deleted orphans.
+            e.HasIndex(ts => new { ts.CourtId, ts.Date, ts.StartTime })
+                .IsUnique()
+                .HasFilter("\"CourtId\" IS NOT NULL");
         });
 
-        // ── BlockedDate (FIXED) ──
+        // ── BlockedDate ──
         modelBuilder.Entity<BlockedDate>(e =>
         {
             e.Property(bd => bd.ClientId).HasColumnName("client_id");
 
-            // 👇 This ensures EF Core maps the nullable Client relationship correctly
             e.HasOne(bd => bd.Client)
                 .WithMany()
                 .HasForeignKey(bd => bd.ClientId)
@@ -183,8 +195,7 @@ public class AppDbContext : DbContext
                 .HasForeignKey(bd => bd.CourtId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            e.Property(bd => bd.Date)
-                .HasConversion(new DateTimeToUtcConverter());
+            e.Property(bd => bd.Date).HasConversion(new DateTimeToUtcConverter());
         });
 
         // ── PriceRule ──
@@ -241,8 +252,7 @@ public class AppDbContext : DbContext
                 .HasForeignKey(sc => sc.OpenPlaySessionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            e.Property(s => s.Date)
-                .HasConversion(new DateTimeToUtcConverter());
+            e.Property(s => s.Date).HasConversion(new DateTimeToUtcConverter());
         });
 
         // ── OpenPlaySessionCourt ──
@@ -276,7 +286,6 @@ public class AppDbContext : DbContext
     }
 }
 
-// Converts DateTime to always be UTC on save and read
 public class DateTimeToUtcConverter : ValueConverter<DateTime, DateTime>
 {
     public DateTimeToUtcConverter()

@@ -28,7 +28,6 @@ public class ExpiredBookingWorker : BackgroundService
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
 
-                // Find distinct clients that have expired pending payments
                 var clientIds = await db.Bookings
                     .Where(b => b.Status == "pending_payment"
                              && b.PaymentExpiresAt != null
@@ -39,21 +38,21 @@ public class ExpiredBookingWorker : BackgroundService
 
                 foreach (var clientId in clientIds)
                 {
-                    // Run the existing method in BookingService
-                    await bookingService.CancelExpiredPaymentsAsync(clientId);
-                }
-
-                if (clientIds.Count > 0)
-                {
-                    _logger.LogInformation($"Auto-expired pending bookings for {clientIds.Count} clients.");
+                    try
+                    {
+                        await bookingService.CancelExpiredPaymentsAsync(clientId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to expire bookings for client {ClientId}", clientId);
+                    }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error occurred while auto-expiring bookings.");
+                _logger.LogError(ex, "ExpiredBookingWorker top-level failure");
             }
 
-            // Wait 1 minute before checking again
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
         }
     }

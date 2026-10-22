@@ -158,11 +158,6 @@ namespace PickleballBookingSystem.Migrations
                         .HasColumnType("text")
                         .HasColumnName("accent_color");
 
-                    b.Property<string>("AvailableAmenitiesRaw")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("available_amenities");
-
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -226,11 +221,6 @@ namespace PickleballBookingSystem.Migrations
 
                     b.Property<TimeOnly>("CloseTime")
                         .HasColumnType("time without time zone");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("NOW() AT TIME ZONE 'UTC'");
 
                     b.Property<string>("Description")
                         .HasColumnType("text");

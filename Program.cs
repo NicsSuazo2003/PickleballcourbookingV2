@@ -1,9 +1,9 @@
 using System.Security.Claims;
 using System.Text;
-using System.Threading.RateLimiting; // 👈 ADDED
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.RateLimiting; // 👈 ADDED
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PickleballBookingSystem.Data;
@@ -13,21 +13,25 @@ using PickleballBookingSystem.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Rebuild configuration FIRST
+// Rebuild configuration FIRST so env vars can override the JSON file
 builder.Configuration.Sources.Clear();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
 builder.Configuration.AddEnvironmentVariables();
 
-// THEN bind the URL, so it isn't wiped out
 var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-// Database
+// ─── Database ─────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// JWT
-var jwtKey = builder.Configuration["Jwt:Key"]!;
+// ─── JWT ──────────────────────────────────────────────────
+var jwtKey = builder.Configuration["Jwt:Key"]
+    ?? throw new InvalidOperationException("Jwt:Key must be configured (use env var, never commit it).");
+
+if (jwtKey.Length < 32)
+    throw new InvalidOperationException("Jwt:Key must be at least 32 characters.");
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -37,6 +41,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.FromSeconds(30),
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
@@ -46,20 +51,126 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
-builder.Services.AddHttpClient();
-builder.Services.AddSingleton<EmailService>();
+builder.Services.AddHttpContextAccessor();
 
-// 👇 ADDED: Rate Limiting
-builder.Services.AddRateLimiter(options =>
+// ─── Typed HTTP clients (socket-reuse, timeouts) ──────────
+builder.Services.AddHttpClient("supabase", c => { c.Timeout = TimeSpan.FromSeconds(20); });
+builder.Services.AddHttpClient("brevo", c =>
 {
-    options.AddFixedWindowLimiter("booking", opt =>
-    {
-        opt.PermitLimit = 5;
-        opt.Window = TimeSpan.FromMinutes(1);
-        opt.QueueLimit = 0;
-    });
+    c.BaseAddress = new Uri("https://api.brevo.com/");
+    c.Timeout = TimeSpan.FromSeconds(15);
 });
 
+// ─── Rate Limiter ─────────────────────────────────────────
+builder.Services.AddRateLimiter(options =>
+{
+    static string ClientIp(HttpContext ctx) =>
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    // Global fallback
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    {
+        var route = ctx.Request.Path.Value ?? "/";
+        var prefix =
+            route.StartsWith("/api/bookings", StringComparison.Ordinal) ? "bookings" :
+            route.StartsWith("/api/open-play", StringComparison.Ordinal) ? "openplay" :
+            route.StartsWith("/api/auth", StringComparison.Ordinal) ? "auth" :
+            route.StartsWith("/api/courts", StringComparison.Ordinal) ? "courts" :
+            route.StartsWith("/api/clients", StringComparison.Ordinal) ? "clients" :
+            "other";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: $"{prefix}:{ClientIp(ctx)}",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = prefix switch
+                {
+                    "bookings" => 60,
+                    "openplay" => 60,
+                    "auth" => 20,
+                    "courts" => 120,
+                    "clients" => 120,
+                    _ => 120,
+                },
+                Window = TimeSpan.FromMinutes(1),
+                SegmentsPerWindow = 6,
+                QueueLimit = 0,
+            });
+    });
+
+    // Named policy: booking creation (used on POST /api/bookings)
+    options.AddPolicy("booking", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: $"booking-create:{ClientIp(ctx)}",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 3,
+                Window = TimeSpan.FromMinutes(10),
+                SegmentsPerWindow = 10,
+                QueueLimit = 0,
+            }));
+
+    // Named policy: login / forgot / reset
+    options.AddPolicy("auth", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: $"auth:{ClientIp(ctx)}",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(15),
+                SegmentsPerWindow = 15,
+                QueueLimit = 0,
+            }));
+
+    // Track lookup (enumeration target)
+    options.AddPolicy("track", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: $"track:{ClientIp(ctx)}",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(10),
+                SegmentsPerWindow = 10,
+                QueueLimit = 0,
+            }));
+
+    // Payment screenshot upload
+    options.AddPolicy("upload", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: $"upload:{ClientIp(ctx)}",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 3,
+                Window = TimeSpan.FromHours(1),
+                SegmentsPerWindow = 12,
+                QueueLimit = 0,
+            }));
+
+    // Open-play join
+    options.AddPolicy("join", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: $"join:{ClientIp(ctx)}",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromHours(1),
+                SegmentsPerWindow = 12,
+                QueueLimit = 0,
+            }));
+
+    // Reject cleanly with 429 JSON
+    options.OnRejected = async (ctx, token) =>
+    {
+        ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        ctx.HttpContext.Response.ContentType = "application/json";
+        await ctx.HttpContext.Response.WriteAsync(
+            """{"message":"Too many requests. Please slow down and try again shortly."}""",
+            token);
+    };
+});
+
+// ─── Services ────────────────────────────────────────────
+builder.Services.AddSingleton<EmailService>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICourtService, CourtService>();
@@ -68,19 +179,19 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IOpenPlayService, OpenPlayService>();
 builder.Services.AddScoped<IPricingRuleService, PricingRuleService>();
-
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ClientResolver>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddHostedService<ExpiredBookingWorker>();
 
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHealthChecks();
 builder.Services.AddSwaggerGen();
 
+// ─── CORS ────────────────────────────────────────────────
 var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? new[] {
+    ?? new[]
+    {
         "http://localhost:5173",
         "http://localhost:3000",
         "https://sideout-playground.vercel.app",
@@ -95,13 +206,14 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
         policy.WithOrigins(corsOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials());
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials());
 });
 
 var app = builder.Build();
 
+// ─── Startup task (non-blocking) ─────────────────────────
 _ = Task.Run(async () =>
 {
     await Task.Delay(TimeSpan.FromSeconds(5));
@@ -109,29 +221,38 @@ _ = Task.Run(async () =>
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        DbSeeder.Initialize(db);
-        var clientService = scope.ServiceProvider.GetRequiredService<IClientService>();
-        Guid clientId;
-        try { clientId = await clientService.GetClientIdBySubdomainAsync("picklejoe"); }
-        catch { var firstClient = await db.Clients.FirstOrDefaultAsync(); clientId = firstClient?.Id ?? Guid.Empty; }
-        if (clientId != Guid.Empty)
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        try { DbSeeder.Initialize(db, app.Configuration, logger); }
+        catch (Exception ex) { logger.LogError(ex, "Seeding failed; app will start with empty DB."); }
+
+        // Sweep every client — never hardcode a tenant
+        var clientIds = await db.Clients.Select(c => c.Id).ToListAsync();
+        var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
+        foreach (var cid in clientIds)
         {
-            var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
-            await bookingService.AutoCompletePastBookingsAsync(clientId);
-            await bookingService.CancelExpiredPaymentsAsync(clientId);
+            try
+            {
+                await bookingService.AutoCompletePastBookingsAsync(cid);
+                await bookingService.CancelExpiredPaymentsAsync(cid);
+            }
+            catch { /* logged by the worker on next tick */ }
         }
     }
     catch { }
 });
 
+// ─── Pipeline ────────────────────────────────────────────
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseCors("Frontend");
-
-// 👇 ADDED: Rate Limiter Middleware
 app.UseRateLimiter();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();

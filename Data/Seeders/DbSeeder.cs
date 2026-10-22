@@ -1,14 +1,36 @@
 // Data/Seeders/DbSeeder.cs
+using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Entities;
 
 namespace PickleballBookingSystem.Data;
 
 public static class DbSeeder
 {
-    public static void Initialize(AppDbContext db)
+    /// <summary>
+    /// Seeds the initial client, sample courts, and (optionally) an admin user.
+    /// All operations run inside a single transaction — partial state is impossible.
+    ///
+    /// The admin seed is DISABLED by default and requires explicit configuration:
+    ///   "Seed:AdminEmail"    (default: none — no admin is created)
+    ///   "Seed:AdminPassword" (required if AdminEmail is set, min 12 chars)
+    ///   "Seed:AdminName"     (default: "Admin")
+    ///
+    /// On first deploy, either:
+    ///   1. Register the first admin through POST /api/auth/register-staff using an
+    ///      existing admin token (chicken-and-egg — not viable on a fresh DB), OR
+    ///   2. Set Seed:AdminEmail/AdminPassword in env vars for the first boot, then
+    ///      remove them, OR
+    ///   3. Insert the admin row manually with a bcrypt hash.
+    /// </summary>
+    public static void Initialize(AppDbContext db, IConfiguration config, ILogger logger)
     {
-        // Seed the initial client + courts + admin user only if there's nothing yet.
-        if (!db.Clients.Any())
+        if (db.Clients.Any())
+        {
+            return;   // already seeded
+        }
+
+        using var tx = db.Database.BeginTransaction();
+        try
         {
             var client = new Client
             {
@@ -22,7 +44,8 @@ public static class DbSeeder
                 GcashAccountName = "PickleJoe Courts",
                 CreatedAt = DateTime.UtcNow,
                 Status = "active",
-                // Amenities start empty — admin adds them via Settings.
+                MaxAdvanceBookingDays = 90,
+                BookingsEnabled = true,
                 AvailableAmenitiesJson = null,
             };
 
@@ -45,8 +68,8 @@ public static class DbSeeder
                         PricePerHour = 350,
                         PeakPricePerHour = 450,
                         Description = "Premium indoor court with professional-grade flooring",
-                        ImageUrl = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48",
-                        ImagesRaw = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48",
+                        ImageUrl = UnsplashUrl("photo-1534438327276-14e5300c3a48"),
+                        ImagesRaw = UnsplashUrl("photo-1534438327276-14e5300c3a48"),
                         AmenitiesRaw = "WiFi,Air Conditioning,Lighting,Showers",
                         Rating = 4.8,
                         Status = "active",
@@ -65,8 +88,8 @@ public static class DbSeeder
                         PricePerHour = 280,
                         PeakPricePerHour = 380,
                         Description = "Open-air court surrounded by greenery",
-                        ImageUrl = "https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67",
-                        ImagesRaw = "https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67",
+                        ImageUrl = UnsplashUrl("photo-1622163642998-1ea32b0bbc67"),
+                        ImagesRaw = UnsplashUrl("photo-1622163642998-1ea32b0bbc67"),
                         AmenitiesRaw = "WiFi,Lighting,Parking",
                         Rating = 4.5,
                         Status = "active",
@@ -85,8 +108,8 @@ public static class DbSeeder
                         PricePerHour = 500,
                         PeakPricePerHour = 650,
                         Description = "Flagship court with stadium seating",
-                        ImageUrl = "https://images.unsplash.com/photo-1554068865-24cecd4e34b8",
-                        ImagesRaw = "https://images.unsplash.com/photo-1554068865-24cecd4e34b8",
+                        ImageUrl = UnsplashUrl("photo-1554068865-24cecd4e34b8"),
+                        ImagesRaw = UnsplashUrl("photo-1554068865-24cecd4e34b8"),
                         AmenitiesRaw = "WiFi,Air Conditioning,Lighting,Showers,Pro Shop",
                         Rating = 4.9,
                         Status = "active",
@@ -101,22 +124,64 @@ public static class DbSeeder
                 db.SaveChanges();
             }
 
-            if (!db.Users.Any())
-            {
-                var admin = new User
-                {
-                    Id = Guid.NewGuid(),
-                    Email = "admin@picklejoe.com",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
-                    Name = "Admin User",
-                    Role = "admin",
-                    Status = "active",
-                    CreatedAt = DateTime.UtcNow,
-                };
+            // ── Admin seed — only if explicitly configured ──
+            var adminEmail = config["Seed:AdminEmail"]?.Trim().ToLowerInvariant();
+            var adminPassword = config["Seed:AdminPassword"];
+            var adminName = config["Seed:AdminName"] ?? "Admin";
 
-                db.Users.Add(admin);
-                db.SaveChanges();
+            if (!string.IsNullOrWhiteSpace(adminEmail))
+            {
+                if (string.IsNullOrWhiteSpace(adminPassword) || adminPassword.Length < 12)
+                {
+                    throw new InvalidOperationException(
+                        "Seed:AdminPassword must be set and at least 12 characters long when " +
+                        "Seed:AdminEmail is provided.");
+                }
+
+                if (!db.Users.Any(u => u.Email.ToLower() == adminEmail))
+                {
+                    var admin = new User
+                    {
+                        Id = Guid.NewGuid(),
+                        Email = adminEmail,
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword),
+                        Name = adminName,
+                        Role = "admin",
+                        ClientId = clientId,
+                        Status = "active",
+                        CreatedAt = DateTime.UtcNow,
+                    };
+
+                    db.Users.Add(admin);
+                    db.SaveChanges();
+                    logger.LogWarning(
+                        "Seeded admin {Email}. CHANGE THIS PASSWORD IMMEDIATELY after first login " +
+                        "and remove Seed:AdminEmail/Seed:AdminPassword from the environment.",
+                        adminEmail);
+                }
             }
+            else
+            {
+                logger.LogInformation(
+                    "No admin seeded (Seed:AdminEmail not configured). " +
+                    "Create the first admin manually via bcrypt hash or environment config.");
+            }
+
+            tx.Commit();
+            logger.LogInformation("Database seeding completed for client {Subdomain}", client.Subdomain);
+        }
+        catch (Exception ex)
+        {
+            tx.Rollback();
+            logger.LogError(ex, "Database seeding FAILED — all changes rolled back");
+            throw;
         }
     }
+
+    /// <summary>
+    /// Unsplash URLs need width/quality params to avoid 403 from their CDN
+    /// when hotlinked from an app origin.
+    /// </summary>
+    private static string UnsplashUrl(string id) =>
+        $"https://images.unsplash.com/{id}?auto=format&fit=crop&w=1600&q=80";
 }

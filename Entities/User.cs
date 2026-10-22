@@ -1,4 +1,3 @@
-// Entities/User.cs
 namespace PickleballBookingSystem.Entities;
 
 public class User
@@ -11,7 +10,6 @@ public class User
     public string Role { get; set; } = "staff";
     public string? Avatar { get; set; }
 
-    // ✅ FIX: Ensure CreatedAt is always UTC
     private DateTime _createdAt;
     public DateTime CreatedAt
     {
@@ -22,7 +20,22 @@ public class User
     public int BookingsCount { get; set; }
     public string Status { get; set; } = "active";
 
-    // ✅ Add ClientId to associate user with a client
+    // Password reset token (hashed) + expiry
+    public string? PasswordResetTokenHash { get; set; }
+
+    private DateTime? _passwordResetExpiresAt;
+    public DateTime? PasswordResetExpiresAt
+    {
+        get => _passwordResetExpiresAt;
+        set => _passwordResetExpiresAt = value.HasValue
+            ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+            : null;
+    }
+
+    // 🔒 Login lockout tracking (used by AuthService)
+    public int FailedLoginCount { get; set; } = 0;
+    public DateTime? LockoutUntil { get; set; }
+
     public Guid ClientId { get; set; }
     public Client? Client { get; set; }
 

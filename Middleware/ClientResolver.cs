@@ -1,29 +1,60 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Http;
+
 namespace PickleballBookingSystem.Middleware;
 
+/// <summary>
+/// Resolves the tenant subdomain from the X-Client-Subdomain header or host,
+/// strictly validated against an allowlist configured in appsettings.json:
+///   "Clients": { "AllowedSubdomains": ["picklejoe", "sideout", ...] }
+/// </summary>
 public class ClientResolver
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly HashSet<string> _allowed;
+    private readonly string? _defaultSubdomain;
 
-    public ClientResolver(IHttpContextAccessor httpContextAccessor)
+    public ClientResolver(IHttpContextAccessor httpContextAccessor, IConfiguration config)
     {
         _httpContextAccessor = httpContextAccessor;
+
+        var list = config.GetSection("Clients:AllowedSubdomains").Get<string[]>() ?? Array.Empty<string>();
+        _allowed = new HashSet<string>(list, StringComparer.OrdinalIgnoreCase);
+
+        _defaultSubdomain = config["Clients:DefaultSubdomain"];
     }
 
     public string? GetSubdomain()
     {
-        // Prefer the explicit header sent by the frontend
-        var headerSubdomain = _httpContextAccessor.HttpContext?.Request.Headers["X-Client-Subdomain"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(headerSubdomain))
-            return headerSubdomain;
+        var ctx = _httpContextAccessor.HttpContext;
+        if (ctx is null) return null;
 
-        // Fallback: infer from host (useful if you later map real subdomains, e.g. picklejoe.yourapp.com)
-        var host = _httpContextAccessor.HttpContext?.Request.Host.Host;
-        if (string.IsNullOrEmpty(host)) return null;
+        // 1. Explicit header (frontend sends it)
+        var fromHeader = ctx.Request.Headers["X-Client-Subdomain"].FirstOrDefault();
 
-        var parts = host.Split('.');
-        if (parts.Length >= 2 && parts[0] != "www" && parts[0] != "localhost")
-            return parts[0];
+        // 2. Fallback to host
+        var candidate = fromHeader;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            var host = ctx.Request.Host.Host;
+            if (!string.IsNullOrEmpty(host))
+            {
+                var parts = host.Split('.');
+                if (parts.Length >= 2 && parts[0] != "www" && parts[0] != "localhost")
+                    candidate = parts[0];
+            }
+        }
 
-        return null;
+        // 3. Fallback to configured default (only useful in dev / single-tenant prod)
+        if (string.IsNullOrWhiteSpace(candidate))
+            candidate = _defaultSubdomain;
+
+        if (string.IsNullOrWhiteSpace(candidate))
+            return null;
+
+        candidate = candidate.Trim().ToLowerInvariant();
+
+        // 4. Reject anything not on the allowlist
+        return _allowed.Contains(candidate) ? candidate : null;
     }
 }

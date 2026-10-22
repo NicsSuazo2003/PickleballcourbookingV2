@@ -1,5 +1,4 @@
-﻿// Services/CourtService.cs
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using PickleballBookingSystem.Data;
 using PickleballBookingSystem.DTOs;
 using PickleballBookingSystem.Entities;
@@ -11,21 +10,33 @@ public class CourtService : ICourtService
 {
     private readonly AppDbContext _db;
     private readonly IPricingRuleService _pricingRuleService;
+    private readonly ILogger<CourtService> _logger;
 
-    public CourtService(AppDbContext db, IPricingRuleService pricingRuleService)
+    private const int MaxAmenities = 30;
+    private const int MaxAmenityLength = 60;
+    private const int MaxImages = 10;
+    private const int MaxDescriptionLength = 2000;
+    private const int MaxNameLength = 80;
+    private const decimal MaxPrice = 100_000m;
+
+    public CourtService(
+        AppDbContext db,
+        IPricingRuleService pricingRuleService,
+        ILogger<CourtService> logger)
     {
         _db = db;
         _pricingRuleService = pricingRuleService;
+        _logger = logger;
     }
 
-    // ========================================
-    // ✅ MULTI-COURT METHODS (WITH CLIENT FILTER)
-    // ========================================
+    // ═══════════════════════════════════════════════════════
+    // COURTS
+    // ═══════════════════════════════════════════════════════
 
     public async Task<List<CourtDto>> GetAllCourtsAsync(Guid clientId)
     {
         return await _db.Courts
-            .Where(c => c.ClientId == clientId)
+            .Where(c => c.ClientId == clientId && c.Status != "archived")
             .OrderBy(c => c.CreatedAt)
             .Select(c => MapToDto(c))
             .ToListAsync();
@@ -41,24 +52,44 @@ public class CourtService : ICourtService
 
     public async Task<CourtDto> CreateCourtAsync(CreateCourtRequest request, Guid clientId)
     {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > MaxNameLength)
+            throw new InvalidOperationException("Invalid court name.");
+
+        if (!TimeOnly.TryParse(request.OpenTime, out var open) ||
+            !TimeOnly.TryParse(request.CloseTime, out var close))
+            throw new InvalidOperationException("Invalid operating hours.");
+
+        if (close == open)
+            throw new InvalidOperationException("Close time must differ from open time.");
+        if (close < open && close != TimeOnly.MinValue)
+            throw new InvalidOperationException(
+                "Close time must be after open time (or 00:00 for midnight).");
+
+        ValidatePrice(request.PricePerHour, "hourly price");
+        ValidatePrice(request.PeakPricePerHour, "peak price");
+
+        var amenities = ValidateAmenities(request.Amenities);
+
         var court = new Court
         {
-            Name = request.Name,
+            Name = request.Name.Trim(),
             Type = request.Type,
             Indoor = request.Indoor,
             PricePerHour = request.PricePerHour,
             PeakPricePerHour = request.PeakPricePerHour,
-            Amenities = request.Amenities ?? new List<string>(),
-            OpenTime = TimeOnly.Parse(request.OpenTime),
-            CloseTime = TimeOnly.Parse(request.CloseTime),
+            Amenities = amenities,
+            OpenTime = open,
+            CloseTime = close,
             Dimensions = request.Dimensions ?? "",
             Surface = request.Surface ?? "",
             Status = "active",
             Rating = 0,
             ClientId = clientId
         };
+
         _db.Courts.Add(court);
         await _db.SaveChangesAsync();
+        _logger.LogInformation("Court {CourtId} created for client {ClientId}", court.Id, clientId);
         return MapToDto(court);
     }
 
@@ -68,22 +99,83 @@ public class CourtService : ICourtService
             .FirstOrDefaultAsync(c => c.Id == id && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
 
-        if (request.Name is not null) court.Name = request.Name;
+        if (request.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > MaxNameLength)
+                throw new InvalidOperationException("Invalid court name.");
+            court.Name = request.Name.Trim();
+        }
+
         if (request.Type is not null) court.Type = request.Type;
         if (request.Indoor.HasValue) court.Indoor = request.Indoor.Value;
-        if (request.PricePerHour.HasValue) court.PricePerHour = request.PricePerHour.Value;
-        if (request.PeakPricePerHour.HasValue) court.PeakPricePerHour = request.PeakPricePerHour.Value;
-        if (request.Description is not null) court.Description = request.Description;
-        if (request.Amenities is not null) court.Amenities = request.Amenities;
-        if (request.ImageUrl is not null) court.ImageUrl = request.ImageUrl;
-        if (request.Images is not null) court.Images = request.Images;
-        if (request.Status is not null) court.Status = request.Status;
-        if (request.OpenTime is not null) court.OpenTime = TimeOnly.Parse(request.OpenTime);
-        if (request.CloseTime is not null) court.CloseTime = TimeOnly.Parse(request.CloseTime);
+
+        if (request.PricePerHour.HasValue)
+        {
+            ValidatePrice(request.PricePerHour.Value, "hourly price");
+            court.PricePerHour = request.PricePerHour.Value;
+        }
+
+        if (request.PeakPricePerHour.HasValue)
+        {
+            ValidatePrice(request.PeakPricePerHour.Value, "peak price");
+            court.PeakPricePerHour = request.PeakPricePerHour.Value;
+        }
+
+        if (request.Description is not null)
+        {
+            if (request.Description.Length > MaxDescriptionLength)
+                throw new InvalidOperationException("Description too long.");
+            court.Description = request.Description;
+        }
+
+        if (request.Amenities is not null)
+            court.Amenities = ValidateAmenities(request.Amenities);
+
+        if (request.ImageUrl is not null)
+        {
+            ValidateHttpsUrl(request.ImageUrl, "Image URL");
+            court.ImageUrl = request.ImageUrl;
+        }
+
+        if (request.Images is not null)
+        {
+            if (request.Images.Count > MaxImages)
+                throw new InvalidOperationException($"At most {MaxImages} images are allowed.");
+            foreach (var img in request.Images)
+                ValidateHttpsUrl(img, "Image URL");
+            court.Images = request.Images;
+        }
+
+        if (request.Status is not null)
+        {
+            var allowed = new[] { "active", "archived", "maintenance" };
+            if (!allowed.Contains(request.Status, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Invalid status.");
+            court.Status = request.Status.ToLowerInvariant();
+        }
+
+        if (request.OpenTime is not null)
+        {
+            if (!TimeOnly.TryParse(request.OpenTime, out var o))
+                throw new InvalidOperationException("Invalid open time.");
+            court.OpenTime = o;
+        }
+
+        if (request.CloseTime is not null)
+        {
+            if (!TimeOnly.TryParse(request.CloseTime, out var c))
+                throw new InvalidOperationException("Invalid close time.");
+            court.CloseTime = c;
+        }
+
+        if (court.OpenTime == court.CloseTime)
+            throw new InvalidOperationException("Open and close times must differ.");
+
         if (request.Dimensions is not null) court.Dimensions = request.Dimensions;
         if (request.Surface is not null) court.Surface = request.Surface;
 
         await _db.SaveChangesAsync();
+        _logger.LogInformation("Court {CourtId} updated for client {ClientId}", id, clientId);
         return MapToDto(court);
     }
 
@@ -92,13 +184,31 @@ public class CourtService : ICourtService
         var court = await _db.Courts
             .FirstOrDefaultAsync(c => c.Id == id && c.ClientId == clientId)
             ?? throw new KeyNotFoundException("Court not found");
-        _db.Courts.Remove(court);
+
+        // Refuse hard-delete when future bookings exist
+        var hasFuture = await _db.Bookings
+            .AnyAsync(b => b.CourtId == id
+                        && b.Date >= DateTime.UtcNow.Date
+                        && b.Status != "cancelled"
+                        && b.Status != "expired"
+                        && b.Status != "rejected"
+                        && b.Status != "refunded");
+
+        if (hasFuture)
+            throw new InvalidOperationException(
+                "This court has future bookings. Cancel them first, " +
+                "or set the court status to 'archived' to hide it from customers.");
+
+        // Soft delete
+        court.Status = "archived";
+        _logger.LogWarning("Court {CourtId} archived on tenant {ClientId}", id, clientId);
         await _db.SaveChangesAsync();
     }
 
-    // ========================================
-    // ✅ AVAILABILITY (COURT-SPECIFIC WITH CLIENT)
-    // ========================================
+    // ═══════════════════════════════════════════════════════
+    // AVAILABILITY
+    // ═══════════════════════════════════════════════════════
+
     public async Task<List<TimeSlotAvailabilityDto>> GetCourtAvailabilityAsync(
         Guid courtId,
         DateTime date,
@@ -116,13 +226,13 @@ public class CourtService : ICourtService
         var closeHour = court.CloseTime.Hour;
         if (closeHour == 0) closeHour = 24;
 
-        // ✅ Pull StartTime, EndTime, booking status and payment expiry
-        //    so we can distinguish "booked" from "pending payment".
+        var excludeId = excludeBookingId ?? Guid.Empty;
+
         var bookedSlots = await _db.TimeSlots
             .Where(s => s.Date.Date == date.Date
                      && s.CourtId == courtId
                      && s.Booking.ClientId == clientId
-                     && s.Booking.Id != (excludeBookingId ?? Guid.Empty)
+                     && s.Booking.Id != excludeId
                      && s.Booking.Status != "cancelled"
                      && s.Booking.Status != "expired"
                      && s.Booking.Status != "rejected"
@@ -137,7 +247,6 @@ public class CourtService : ICourtService
             .ToListAsync();
 
         var bookedSet = new HashSet<int>();
-        // 👇 NEW: hour -> expiry (only populated for pending_payment)
         var pendingExpiryByHour = new Dictionary<int, DateTime?>();
 
         foreach (var bs in bookedSlots)
@@ -147,10 +256,8 @@ public class CourtService : ICourtService
             for (int h = startH; h < endH; h++)
             {
                 bookedSet.Add(h);
-
                 if (bs.Status == "pending_payment")
                 {
-                    // Keep the earliest expiry if multiple pending overlap
                     if (!pendingExpiryByHour.TryGetValue(h, out var existing) ||
                         (bs.PaymentExpiresAt.HasValue &&
                          (!existing.HasValue || bs.PaymentExpiresAt < existing)))
@@ -185,11 +292,8 @@ public class CourtService : ICourtService
             else
             {
                 var startH = bd.StartTime.Value.Hour;
-
-                // 👇 FIX: If EndTime is 00:00, treat it as 24 (End of day)
                 var endH = bd.EndTime?.Hour ?? closeHour;
                 if (endH == 0) endH = 24;
-
                 for (int h = startH; h < endH; h++) blockedSet.Add(h);
             }
         }
@@ -206,7 +310,7 @@ public class CourtService : ICourtService
             var startTime = $"{h % 24:D2}:00";
             var endTime = $"{(h + 1) % 24:D2}:00";
 
-            var isPast = isToday && (h < phTime.Hour || (h == phTime.Hour && 0 < phTime.Minute));
+            var isPast = isToday && (h < phTime.Hour || (h == phTime.Hour && phTime.Minute > 0));
             var isBooked = bookedSet.Contains(h);
             var isBlocked = blockedSet.Contains(h);
 
@@ -216,22 +320,12 @@ public class CourtService : ICourtService
             var slotPrice = _pricingRuleService.ResolvePriceFromCourt(court, dateOnly, slotTime);
             var isPeak = slotPrice > court.PricePerHour;
 
-            // 👇 NEW: resolve a single status string for the frontend
             string status;
             DateTime? pendingExpiresAt = null;
 
-            if (isPast)
-            {
-                status = "past";
-            }
-            else if (isOpenPlayBlocked)
-            {
-                status = "open_play";
-            }
-            else if (isBlocked)
-            {
-                status = "blocked";
-            }
+            if (isPast) status = "past";
+            else if (isOpenPlayBlocked) status = "open_play";
+            else if (isBlocked) status = "blocked";
             else if (isBooked)
             {
                 if (pendingExpiryByHour.TryGetValue(h, out var exp) && exp.HasValue)
@@ -239,89 +333,111 @@ public class CourtService : ICourtService
                     status = "pending";
                     pendingExpiresAt = exp;
                 }
-                else
-                {
-                    // payment_submitted / confirmed / completed
-                    status = "booked";
-                }
+                else status = "booked";
             }
-            else
-            {
-                status = "available";
-            }
-
-            var isAvailable = status == "available";
+            else status = "available";
 
             slots.Add(new TimeSlotAvailabilityDto(
                 $"slot-{courtId}-{date:yyyy-MM-dd}-{h}",
                 date.ToString("yyyy-MM-dd"),
                 startTime, endTime,
-                isAvailable,
+                status == "available",
                 slotPrice,
                 isPeak,
                 status,
-                pendingExpiresAt
-            ));
+                pendingExpiresAt));
         }
 
         return slots;
     }
 
-    // ========================================
-    // ✅ BLOCKED DATES (CLIENT-SPECIFIC)
-    // ========================================
+    // ═══════════════════════════════════════════════════════
+    // BLOCKED DATES
+    // ═══════════════════════════════════════════════════════
 
     public async Task<List<BlockedDateDto>> GetBlockedDatesAsync(Guid? courtId, Guid clientId)
     {
         var query = _db.BlockedDates.Where(b => b.ClientId == clientId);
-
         if (courtId.HasValue)
             query = query.Where(b => b.CourtId == courtId || b.CourtId == null);
 
         return await query
             .OrderBy(b => b.Date)
+            .Take(500)
             .Select(b => new BlockedDateDto(
                 b.Id.ToString(),
                 b.Date.ToString("yyyy-MM-dd"),
                 b.StartTime.HasValue ? b.StartTime.Value.ToString("HH:mm") : null,
                 b.EndTime.HasValue ? b.EndTime.Value.ToString("HH:mm") : null,
-                b.Reason
-            ))
+                b.Reason))
             .ToListAsync();
     }
 
-    public async Task<BlockedDateDto> AddBlockedDateAsync(CreateBlockedDateRequest request, Guid? courtId, Guid clientId)
+    public async Task<BlockedDateDto> AddBlockedDateAsync(
+        CreateBlockedDateRequest request, Guid? courtId, Guid clientId)
     {
         if (clientId == Guid.Empty)
-            throw new ArgumentException("ClientId is missing. Ensure the X-Client-Subdomain header is sent.");
+            throw new ArgumentException("Client identification required.");
 
         if (!DateTime.TryParse(request.Date, out var parsedDate))
-            throw new ArgumentException("Invalid date format");
+            throw new ArgumentException("Invalid date format.");
+
+        // Court must belong to this tenant
+        if (courtId.HasValue)
+        {
+            var courtExists = await _db.Courts
+                .AnyAsync(c => c.Id == courtId.Value && c.ClientId == clientId);
+            if (!courtExists)
+                throw new KeyNotFoundException("Court not found for this client.");
+        }
 
         TimeOnly? startTime = null;
         TimeOnly? endTime = null;
 
-        if (!string.IsNullOrEmpty(request.StartTime) && !string.IsNullOrEmpty(request.EndTime))
-        {
-            startTime = TimeOnly.Parse(request.StartTime);
-            endTime = TimeOnly.Parse(request.EndTime);
+        var hasStart = !string.IsNullOrEmpty(request.StartTime);
+        var hasEnd = !string.IsNullOrEmpty(request.EndTime);
 
-            // 👇 FIX: Allow 00:00 as a valid end time (Midnight)
-            if (endTime != TimeOnly.MinValue && endTime <= startTime)
-            {
+        if (hasStart != hasEnd)
+            throw new ArgumentException("Provide both start and end time, or neither for a full-day block.");
+
+        if (hasStart && hasEnd)
+        {
+            if (!TimeOnly.TryParse(request.StartTime, out var st) ||
+                !TimeOnly.TryParse(request.EndTime, out var en))
+                throw new ArgumentException("Invalid time format.");
+
+            if (en != TimeOnly.MinValue && en <= st)
                 throw new ArgumentException("End time must be after start time.");
-            }
+
+            startTime = st;
+            endTime = en;
         }
+
+        var normalizedDate = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc);
+
+        // Duplicate check
+        var duplicate = await _db.BlockedDates.AnyAsync(bd =>
+            bd.ClientId == clientId
+            && bd.CourtId == courtId
+            && bd.Date == normalizedDate
+            && bd.StartTime == startTime
+            && bd.EndTime == endTime);
+
+        if (duplicate)
+            throw new InvalidOperationException("An identical block already exists.");
+
+        var reason = (request.Reason ?? "Maintenance").Trim();
+        if (reason.Length > 200) reason = reason[..200];
 
         var blocked = new BlockedDate
         {
             Id = Guid.NewGuid(),
             CourtId = courtId,
             ClientId = clientId,
-            Date = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc),
+            Date = normalizedDate,
             StartTime = startTime,
             EndTime = endTime,
-            Reason = request.Reason ?? "Maintenance",
+            Reason = reason,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -333,7 +449,9 @@ public class CourtService : ICourtService
         }
         catch (DbUpdateException ex)
         {
-            throw new Exception($"DB Error: {ex.InnerException?.Message ?? ex.Message}");
+            _logger.LogError(ex, "Failed to add blocked date for client {ClientId}", clientId);
+            throw new InvalidOperationException(
+                "Could not save the blocked date. Please check the values and try again.");
         }
 
         return new BlockedDateDto(
@@ -341,8 +459,7 @@ public class CourtService : ICourtService
             blocked.Date.ToString("yyyy-MM-dd"),
             blocked.StartTime?.ToString("HH:mm"),
             blocked.EndTime?.ToString("HH:mm"),
-            blocked.Reason
-        );
+            blocked.Reason);
     }
 
     public async Task DeleteBlockedDateAsync(Guid id, Guid clientId)
@@ -350,38 +467,14 @@ public class CourtService : ICourtService
         var blocked = await _db.BlockedDates
             .FirstOrDefaultAsync(b => b.Id == id && b.ClientId == clientId)
             ?? throw new KeyNotFoundException("Blocked date not found");
+
         _db.BlockedDates.Remove(blocked);
         await _db.SaveChangesAsync();
     }
 
-    // ========================================
-    // ⚠️ DEPRECATED - Single Court Methods
-    // ========================================
-
-    public async Task<CourtDto> GetCourtAsync()
-    {
-        var court = await _db.Courts.FirstOrDefaultAsync()
-            ?? throw new KeyNotFoundException("Court not found");
-        return MapToDto(court);
-    }
-
-    public async Task<List<TimeSlotAvailabilityDto>> GetAvailabilityAsync(DateTime date)
-    {
-        var court = await _db.Courts.FirstOrDefaultAsync()
-            ?? throw new KeyNotFoundException("Court not found");
-        return await GetCourtAvailabilityAsync(court.Id, date, court.ClientId);
-    }
-
-    public async Task<CourtDto> UpdateCourtSettingsAsync(UpdateCourtRequest request)
-    {
-        var court = await _db.Courts.FirstOrDefaultAsync()
-            ?? throw new KeyNotFoundException("Court not found");
-        return await UpdateCourtAsync(court.Id, request, court.ClientId);
-    }
-
-    // ========================================
-    // ✅ PRICE RULES (CLIENT-SPECIFIC)
-    // ========================================
+    // ═══════════════════════════════════════════════════════
+    // PRICE RULES
+    // ═══════════════════════════════════════════════════════
 
     public async Task<List<PriceRuleDto>> GetPriceRulesAsync(Guid clientId)
     {
@@ -397,41 +490,88 @@ public class CourtService : ICourtService
                 r.EndTime.ToString("HH:mm"),
                 r.PricePerHour,
                 r.IsActive,
-                r.Priority
-            ))
+                r.Priority))
             .ToListAsync();
     }
 
     public async Task<PriceRuleDto> CreatePriceRuleAsync(CreatePriceRuleRequest request, Guid clientId)
     {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 80)
+            throw new ArgumentException("Invalid rule name.");
+        ValidatePrice(request.PricePerHour, "price per hour");
+        if (request.Priority < 0 || request.Priority > 1000)
+            throw new ArgumentException("Priority must be between 0 and 1000.");
+
+        if (!TimeOnly.TryParse(request.StartTime, out var start) ||
+            !TimeOnly.TryParse(request.EndTime, out var end))
+            throw new ArgumentException("Invalid time format.");
+        if (end != TimeOnly.MinValue && end <= start)
+            throw new ArgumentException("End time must be after start time.");
+
         var rule = new PriceRule
         {
-            Name = request.Name,
+            Name = request.Name.Trim(),
             DayOfWeek = request.DayOfWeek,
-            StartTime = TimeOnly.Parse(request.StartTime),
-            EndTime = TimeOnly.Parse(request.EndTime),
+            StartTime = start,
+            EndTime = end,
             PricePerHour = request.PricePerHour,
             Priority = request.Priority,
             ClientId = clientId
         };
+
         _db.PriceRules.Add(rule);
         await _db.SaveChangesAsync();
         return MapPriceRuleToDto(rule);
     }
 
-    public async Task<PriceRuleDto> UpdatePriceRuleAsync(Guid id, UpdatePriceRuleRequest request, Guid clientId)
+    public async Task<PriceRuleDto> UpdatePriceRuleAsync(
+        Guid id, UpdatePriceRuleRequest request, Guid clientId)
     {
         var rule = await _db.PriceRules
             .FirstOrDefaultAsync(r => r.Id == id && r.ClientId == clientId)
             ?? throw new KeyNotFoundException("Price rule not found");
 
-        if (request.Name is not null) rule.Name = request.Name;
+        if (request.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 80)
+                throw new ArgumentException("Invalid rule name.");
+            rule.Name = request.Name.Trim();
+        }
+
         if (request.DayOfWeek is not null) rule.DayOfWeek = request.DayOfWeek;
-        if (request.StartTime is not null) rule.StartTime = TimeOnly.Parse(request.StartTime);
-        if (request.EndTime is not null) rule.EndTime = TimeOnly.Parse(request.EndTime);
-        if (request.PricePerHour.HasValue) rule.PricePerHour = request.PricePerHour.Value;
+
+        if (request.StartTime is not null)
+        {
+            if (!TimeOnly.TryParse(request.StartTime, out var st))
+                throw new ArgumentException("Invalid start time.");
+            rule.StartTime = st;
+        }
+
+        if (request.EndTime is not null)
+        {
+            if (!TimeOnly.TryParse(request.EndTime, out var en))
+                throw new ArgumentException("Invalid end time.");
+            rule.EndTime = en;
+        }
+
+        if (rule.EndTime != TimeOnly.MinValue && rule.EndTime <= rule.StartTime)
+            throw new ArgumentException("End time must be after start time.");
+
+        if (request.PricePerHour.HasValue)
+        {
+            ValidatePrice(request.PricePerHour.Value, "price per hour");
+            rule.PricePerHour = request.PricePerHour.Value;
+        }
+
         if (request.IsActive.HasValue) rule.IsActive = request.IsActive.Value;
-        if (request.Priority.HasValue) rule.Priority = request.Priority.Value;
+
+        if (request.Priority.HasValue)
+        {
+            if (request.Priority.Value < 0 || request.Priority.Value > 1000)
+                throw new ArgumentException("Priority must be between 0 and 1000.");
+            rule.Priority = request.Priority.Value;
+        }
+
         await _db.SaveChangesAsync();
         return MapPriceRuleToDto(rule);
     }
@@ -445,9 +585,42 @@ public class CourtService : ICourtService
         await _db.SaveChangesAsync();
     }
 
-    // ========================================
-    // ✅ PRIVATE HELPERS
-    // ========================================
+    // ═══════════════════════════════════════════════════════
+    // VALIDATION HELPERS
+    // ═══════════════════════════════════════════════════════
+
+    private static void ValidatePrice(decimal price, string label)
+    {
+        if (price < 0 || price > MaxPrice)
+            throw new InvalidOperationException($"Invalid {label}.");
+    }
+
+    private static void ValidateHttpsUrl(string url, string label)
+    {
+        if (string.IsNullOrWhiteSpace(url) || url.Length > 2000)
+            throw new InvalidOperationException($"{label} is invalid.");
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https")
+            throw new InvalidOperationException($"{label} must be a valid https:// URL.");
+    }
+
+    private static List<string> ValidateAmenities(List<string>? amenities)
+    {
+        if (amenities is null) return new List<string>();
+        if (amenities.Count > MaxAmenities)
+            throw new InvalidOperationException($"At most {MaxAmenities} amenities are allowed.");
+        foreach (var a in amenities)
+        {
+            if (string.IsNullOrWhiteSpace(a) || a.Length > MaxAmenityLength)
+                throw new InvalidOperationException("Invalid amenity.");
+            if (a.Contains(',') || a.Contains('<') || a.Contains('>'))
+                throw new InvalidOperationException("Amenities cannot contain commas or markup.");
+        }
+        return amenities.Select(a => a.Trim()).ToList();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // MAPPERS
+    // ═══════════════════════════════════════════════════════
 
     private static PriceRuleDto MapPriceRuleToDto(PriceRule r) => new(
         r.Id.ToString(),
@@ -457,8 +630,7 @@ public class CourtService : ICourtService
         r.EndTime.ToString("HH:mm"),
         r.PricePerHour,
         r.IsActive,
-        r.Priority
-    );
+        r.Priority);
 
     private static CourtDto MapToDto(Court c) => new(
         c.Id.ToString(),
@@ -476,6 +648,5 @@ public class CourtService : ICourtService
         c.OpenTime.ToString("HH:mm"),
         c.CloseTime.ToString("HH:mm"),
         c.Dimensions,
-        c.Surface
-    );
+        c.Surface);
 }
