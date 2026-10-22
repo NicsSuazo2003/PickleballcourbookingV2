@@ -14,19 +14,28 @@ public class AdminService : IAdminService
     public AdminService(AppDbContext db) => _db = db;
 
     // ═══════════════════════════════════════════════════════
-    // ANALYTICS (single-query aggregation)
+    // ANALYTICS
     // ═══════════════════════════════════════════════════════
     public async Task<AnalyticsDto> GetAnalyticsAsync(Guid clientId)
     {
+        // ─── Aggregate counts by status (single server round-trip) ───
+        // GroupBy on a text column + Count + Sum on decimal translates fine in Npgsql.
         var stats = await _db.Bookings
             .Where(b => b.ClientId == clientId)
             .GroupBy(b => b.Status)
-            .Select(g => new { Status = g.Key, Count = g.Count(), Revenue = g.Sum(b => b.TotalAmount) })
+            .Select(g => new
+            {
+                Status = g.Key,
+                Count = g.Count(),
+                Revenue = g.Sum(b => b.TotalAmount),
+            })
             .ToListAsync();
 
         var map = stats.ToDictionary(s => s.Status, s => s);
-        int CountOf(params string[] s) => s.Sum(x => map.TryGetValue(x, out var v) ? v.Count : 0);
-        decimal RevenueOf(params string[] s) => s.Sum(x => map.TryGetValue(x, out var v) ? v.Revenue : 0);
+        int CountOf(params string[] s) =>
+            s.Sum(x => map.TryGetValue(x, out var v) ? v.Count : 0);
+        decimal RevenueOf(params string[] s) =>
+            s.Sum(x => map.TryGetValue(x, out var v) ? v.Revenue : 0);
 
         var totalRevenue = RevenueOf("confirmed", "completed");
         var totalBookings = stats.Sum(s => s.Count);
@@ -35,24 +44,54 @@ public class AdminService : IAdminService
         var completedBookings = CountOf("completed");
         var cancelledBookings = CountOf("cancelled", "rejected");
 
+        // ─── Distinct customer count ───
         var distinctUsers = await _db.Bookings
             .Where(b => b.ClientId == clientId)
             .Select(b => b.CustomerEmail.ToLower())
             .Distinct()
             .CountAsync();
 
-        var revenueByDay = await _db.Bookings
-            .Where(b => b.ClientId == clientId
-                     && (b.Status == "confirmed" || b.Status == "completed"))
-            .GroupBy(b => b.Date.Date)
-            .Select(g => new RevenueByDayDto(g.Key.ToString("yyyy-MM-dd"), g.Sum(b => b.TotalAmount)))
-            .OrderBy(r => r.Date).TakeLast(30).ToListAsync();
+        // ─── Revenue by day (last 30 days) — SAFE PATTERN ───
+        // Root cause of the 409: TakeLast() is not translatable by EF Core.
+        // Fix: OrderByDescending + Take(30) + reverse in memory.
+        //
+        // Also: GroupBy(b => b.Date.Date) sometimes fails to translate on
+        // timestamptz in Npgsql. Fetch raw rows and group in memory — for
+        // 30 days of bookings that's a few hundred rows, negligible cost.
+        var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30).Date;
 
-        var bookingsByDay = await _db.Bookings
-            .Where(b => b.ClientId == clientId)
+        var recentConfirmed = await _db.Bookings
+            .Where(b => b.ClientId == clientId
+                     && (b.Status == "confirmed" || b.Status == "completed")
+                     && b.Date >= thirtyDaysAgo)
+            .Select(b => new { b.Date, b.TotalAmount })
+            .ToListAsync();
+
+        var revenueByDay = recentConfirmed
             .GroupBy(b => b.Date.Date)
-            .Select(g => new BookingsByDayDto(g.Key.ToString("yyyy-MM-dd"), g.Count()))
-            .OrderBy(b => b.Date).TakeLast(30).ToListAsync();
+            .Select(g => new RevenueByDayDto(
+                g.Key.ToString("yyyy-MM-dd"),
+                g.Sum(b => b.TotalAmount)))
+            .OrderByDescending(r => r.Date)
+            .Take(30)
+            .OrderBy(r => r.Date)
+            .ToList();
+
+        // ─── Bookings by day (last 30 days) — SAFE PATTERN ───
+        var recentAll = await _db.Bookings
+            .Where(b => b.ClientId == clientId && b.Date >= thirtyDaysAgo)
+            .Select(b => new { b.Date })
+            .ToListAsync();
+
+        var bookingsByDay = recentAll
+            .GroupBy(b => b.Date.Date)
+            .Select(g => new BookingsByDayDto(
+                g.Key.ToString("yyyy-MM-dd"),
+                g.Count()))
+            .OrderByDescending(b => b.Date)
+            .Take(30)
+            .OrderBy(b => b.Date)
+            .ToList();
 
         return new AnalyticsDto(
             totalRevenue, totalBookings, distinctUsers,
@@ -71,7 +110,13 @@ public class AdminService : IAdminService
         var perCourt = await _db.Bookings
             .Where(b => b.ClientId == clientId)
             .GroupBy(b => new { b.CourtId, b.Status })
-            .Select(g => new { g.Key.CourtId, g.Key.Status, Count = g.Count(), Revenue = g.Sum(b => b.TotalAmount) })
+            .Select(g => new
+            {
+                g.Key.CourtId,
+                g.Key.Status,
+                Count = g.Count(),
+                Revenue = g.Sum(b => b.TotalAmount),
+            })
             .ToListAsync();
 
         var slotCounts = await _db.TimeSlots
