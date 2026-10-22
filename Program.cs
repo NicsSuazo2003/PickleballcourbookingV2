@@ -158,9 +158,43 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // Reject cleanly with 429 JSON
+    // ✅ Reject + log to security_events
     options.OnRejected = async (ctx, token) =>
     {
+        // Log rate-limit event (non-blocking; failures must not 500 the request)
+        try
+        {
+            var clientId = ctx.HttpContext.Items["ClientId"] as Guid?;
+            if (clientId is Guid cid)
+            {
+                var secLogger = ctx.HttpContext.RequestServices.GetService<ISecurityLogger>();
+                if (secLogger is not null)
+                {
+                    var ip = ctx.HttpContext.Connection.RemoteIpAddress?.ToString();
+                    var ua = ctx.HttpContext.Request.Headers["User-Agent"].FirstOrDefault();
+
+                    await secLogger.LogAsync(new SecurityEvent
+                    {
+                        ClientId = cid,
+                        IpHash = secLogger.HashIp(ip),
+                        IpAddress = ip,
+                        UserAgent = ua,
+                        EventType = "rate_limit.triggered",
+                        Severity = "warning",
+                        Message = $"Rate limit hit on {ctx.HttpContext.Request.Method} {ctx.HttpContext.Request.Path}",
+                        Metadata = new
+                        {
+                            path = ctx.HttpContext.Request.Path.Value,
+                            method = ctx.HttpContext.Request.Method,
+                        },
+                        Success = false,
+                        ErrorCode = "429",
+                    });
+                }
+            }
+        }
+        catch { /* never let logging break the 429 response */ }
+
         ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         ctx.HttpContext.Response.ContentType = "application/json";
         await ctx.HttpContext.Response.WriteAsync(
@@ -230,7 +264,6 @@ _ = Task.Run(async () =>
         try { DbSeeder.Initialize(db, app.Configuration, logger); }
         catch (Exception ex) { logger.LogError(ex, "Seeding failed; app will start with empty DB."); }
 
-        // Sweep every client — never hardcode a tenant
         var clientIds = await db.Clients.Select(c => c.Id).ToListAsync();
         var bookingService = scope.ServiceProvider.GetRequiredService<IBookingService>();
         foreach (var cid in clientIds)
@@ -249,6 +282,11 @@ _ = Task.Run(async () =>
 // ─── Pipeline ────────────────────────────────────────────
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();
+
+// ✅ ClientResolver must run BEFORE UseRateLimiter so that
+// OnRejected can read HttpContext.Items["ClientId"]
+app.UseMiddleware<ClientResolver>();
+
 app.UseCors("Frontend");
 app.UseRateLimiter();
 
