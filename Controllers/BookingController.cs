@@ -74,6 +74,14 @@ public class BookingController : ControllerBase
         return Ok(booking);
     }
 
+    [HttpGet("{id}")]
+    public async Task<ActionResult<BookingDto>> GetById(Guid id)
+    {
+        var clientId = await GetClientId();
+        var booking = await _booking.GetBookingAsync(id, clientId);
+        return Ok(booking);
+    }
+
     [HttpGet("track-summaries-by-email")]
     [EnableRateLimiting("track")]
     public async Task<ActionResult<List<BookingSummaryDto>>> TrackSummariesByEmail([FromQuery] string email)
