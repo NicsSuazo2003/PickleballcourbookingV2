@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;          // ✅ NEW
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -13,7 +14,6 @@ using PickleballBookingSystem.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Rebuild configuration FIRST so env vars can override the JSON file
 builder.Configuration.Sources.Clear();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
 builder.Configuration.AddEnvironmentVariables();
@@ -53,7 +53,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
-// ─── Typed HTTP clients (socket-reuse, timeouts) ──────────
+// ─── ForwardedHeaders: trust X-Forwarded-For from Render's edge ───
+//     MUST be configured here and used in the pipeline BEFORE any
+//     component that reads HttpContext.Connection.RemoteIpAddress
+//     (RateLimiter, ClientResolver, SecurityLogger, etc.).
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
+    // Render terminates at Cloudflare, then its own internal proxy.
+    // Clear the default trust list (127.0.0.1 only) so those proxies are trusted.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// ─── Typed HTTP clients ───────────────────────────────────
 builder.Services.AddHttpClient("supabase", c => { c.Timeout = TimeSpan.FromSeconds(20); });
 builder.Services.AddHttpClient("brevo", c =>
 {
@@ -98,7 +113,6 @@ builder.Services.AddRateLimiter(options =>
             });
     });
 
-    // Named policy: booking creation (used on POST /api/bookings)
     options.AddPolicy("booking", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"booking-create:{ClientIp(ctx)}",
@@ -110,7 +124,6 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // Named policy: login / forgot / reset
     options.AddPolicy("auth", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"auth:{ClientIp(ctx)}",
@@ -122,7 +135,6 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // Track lookup (enumeration target)
     options.AddPolicy("track", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"track:{ClientIp(ctx)}",
@@ -134,7 +146,6 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // Payment screenshot upload
     options.AddPolicy("upload", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"upload:{ClientIp(ctx)}",
@@ -146,7 +157,6 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // Open-play join
     options.AddPolicy("join", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"join:{ClientIp(ctx)}",
@@ -158,7 +168,6 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
-    // Reject + log to security_events
     options.OnRejected = async (ctx, token) =>
     {
         try
@@ -192,7 +201,7 @@ builder.Services.AddRateLimiter(options =>
                 }
             }
         }
-        catch { /* never let logging break the 429 response */ }
+        catch { }
 
         ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         ctx.HttpContext.Response.ContentType = "application/json";
@@ -212,12 +221,9 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IOpenPlayService, OpenPlayService>();
 builder.Services.AddScoped<IPricingRuleService, PricingRuleService>();
-// ✅ ClientResolver is NOT registered here — it's middleware-only
-// and requires RequestDelegate, which DI cannot construct.
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddHostedService<ExpiredBookingWorker>();
 
-// Security logging
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ISecurityLogger, SecurityLogger>();
 builder.Services.AddHostedService<SecurityRetentionWorker>();
@@ -252,7 +258,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// ─── Startup task (non-blocking) ─────────────────────────
+// ─── Startup task ─────────────────────────────────────────
 _ = Task.Run(async () =>
 {
     await Task.Delay(TimeSpan.FromSeconds(5));
@@ -273,18 +279,20 @@ _ = Task.Run(async () =>
                 await bookingService.AutoCompletePastBookingsAsync(cid);
                 await bookingService.CancelExpiredPaymentsAsync(cid);
             }
-            catch { /* logged by the worker on next tick */ }
+            catch { }
         }
     }
     catch { }
 });
 
 // ─── Pipeline ────────────────────────────────────────────
+
+// ✅ MUST be first — rewrites RemoteIpAddress to the real client IP
+//    before anything (ClientResolver, RateLimiter, SecurityLogger) reads it.
+app.UseForwardedHeaders();
+
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();
-
-// ClientResolver must run BEFORE UseRateLimiter so that
-// OnRejected can read HttpContext.Items["ClientId"]
 app.UseMiddleware<ClientResolver>();
 
 app.UseCors("Frontend");
