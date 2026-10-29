@@ -202,7 +202,7 @@ public class ClientService : IClientService
         c.GcashNumber, c.GcashAccountName,
         // Only enabled methods; strip config keys
         DeserializePaymentMethods(c.PaymentMethods)?
-            .Where(m => m.Enabled)
+            .Where(m => m.Enabled && m.Config is not null)
             .Select(m => new PaymentMethodDto(
                 m.Id, m.Name, m.Icon, m.Enabled,
                 new PaymentMethodConfigDto(

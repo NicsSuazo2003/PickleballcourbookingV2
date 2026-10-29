@@ -3,8 +3,8 @@
 namespace PickleballBookingSystem.DTOs;
 
 public record PaymentMethodConfigDto(
-    string AccountNumber,
-    string AccountName,
+    string? AccountNumber,   // ✅ Added ?
+    string? AccountName,     // ✅ Added ?
     string? QrImageUrl,
     string? Instructions
 );
