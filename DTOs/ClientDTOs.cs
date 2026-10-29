@@ -1,4 +1,3 @@
-// DTOs/ClientDTOs.cs
 namespace PickleballBookingSystem.DTOs;
 
 // 🔒 PUBLIC — customer-facing settings endpoint
@@ -13,7 +12,11 @@ public record ClientPublicDto(
     List<PaymentMethodDto>? PaymentMethods,
     List<AmenityItemDto> AvailableAmenities,
     int MaxAdvanceBookingDays,
-    bool BookingsEnabled
+    bool BookingsEnabled,
+    // ── NEW: fixed booking window ──
+    string BookingWindowMode,
+    string? BookingOpenDate,   // yyyy-MM-dd or null
+    string? BookingCloseDate   // yyyy-MM-dd or null
 );
 
 // 🔒 ADMIN — settings page
@@ -29,5 +32,9 @@ public record ClientAdminDto(
     List<PaymentMethodDto>? PaymentMethods,
     List<AmenityItemDto> AvailableAmenities,
     int MaxAdvanceBookingDays,
-    bool BookingsEnabled
+    bool BookingsEnabled,
+    // ── NEW: fixed booking window ──
+    string BookingWindowMode,
+    string? BookingOpenDate,
+    string? BookingCloseDate
 );

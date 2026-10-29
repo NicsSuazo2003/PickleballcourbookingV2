@@ -19,7 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<OpenPlaySession> OpenPlaySessions => Set<OpenPlaySession>();
     public DbSet<OpenPlaySessionCourt> OpenPlaySessionCourts => Set<OpenPlaySessionCourt>();
     public DbSet<PricingRule> PricingRules => Set<PricingRule>();
-    public DbSet<SecurityEventEntity> SecurityEvents => Set<SecurityEventEntity>();   // ✅ NEW
+    public DbSet<SecurityEventEntity> SecurityEvents => Set<SecurityEventEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +66,20 @@ public class AppDbContext : DbContext
             e.Property(c => c.MaxAdvanceBookingDays)
                 .HasColumnName("max_advance_booking_days")
                 .HasDefaultValue(90);
+
+            // ── NEW: fixed booking window ──
+            e.Property(c => c.BookingWindowMode)
+                .HasColumnName("booking_window_mode")
+                .HasDefaultValue("rolling");
+
+            e.Property(c => c.BookingOpenDate)
+                .HasColumnName("booking_open_date")
+                .HasColumnType("date");
+
+            e.Property(c => c.BookingCloseDate)
+                .HasColumnName("booking_close_date")
+                .HasColumnType("date");
+            // ───────────────────────────────
 
             e.Property(c => c.CreatedAt).HasColumnName("created_at");
             e.Property(c => c.Status).HasColumnName("status");

@@ -30,7 +30,13 @@ public record UpdateClientSettingsRequest(
     List<PaymentMethodDto>? PaymentMethods,
     List<AmenityItemDto>? AvailableAmenities,
     [Range(0, 365)] int? MaxAdvanceBookingDays,
-    bool? BookingsEnabled
+    bool? BookingsEnabled,
+    // ── NEW: fixed booking window ──
+    [RegularExpression("^(rolling|fixed|closed)$",
+        ErrorMessage = "Booking window mode must be 'rolling', 'fixed', or 'closed'.")]
+    string? BookingWindowMode,
+    DateTime? BookingOpenDate,
+    DateTime? BookingCloseDate
 );
 
 public record CreateStaffRequest(

@@ -6,27 +6,11 @@ namespace PickleballBookingSystem.Data;
 
 public static class DbSeeder
 {
-    /// <summary>
-    /// Seeds the initial client, sample courts, and (optionally) an admin user.
-    /// All operations run inside a single transaction — partial state is impossible.
-    ///
-    /// The admin seed is DISABLED by default and requires explicit configuration:
-    ///   "Seed:AdminEmail"    (default: none — no admin is created)
-    ///   "Seed:AdminPassword" (required if AdminEmail is set, min 12 chars)
-    ///   "Seed:AdminName"     (default: "Admin")
-    ///
-    /// On first deploy, either:
-    ///   1. Register the first admin through POST /api/auth/register-staff using an
-    ///      existing admin token (chicken-and-egg — not viable on a fresh DB), OR
-    ///   2. Set Seed:AdminEmail/AdminPassword in env vars for the first boot, then
-    ///      remove them, OR
-    ///   3. Insert the admin row manually with a bcrypt hash.
-    /// </summary>
     public static void Initialize(AppDbContext db, IConfiguration config, ILogger logger)
     {
         if (db.Clients.Any())
         {
-            return;   // already seeded
+            return;
         }
 
         using var tx = db.Database.BeginTransaction();
@@ -46,6 +30,11 @@ public static class DbSeeder
                 Status = "active",
                 MaxAdvanceBookingDays = 90,
                 BookingsEnabled = true,
+                // ── NEW: default to rolling so existing behavior is unchanged ──
+                BookingWindowMode = "rolling",
+                BookingOpenDate = null,
+                BookingCloseDate = null,
+                // ─────────────────────────────────────────────────────────────────
                 AvailableAmenitiesJson = null,
             };
 
@@ -124,7 +113,6 @@ public static class DbSeeder
                 db.SaveChanges();
             }
 
-            // ── Admin seed — only if explicitly configured ──
             var adminEmail = config["Seed:AdminEmail"]?.Trim().ToLowerInvariant();
             var adminPassword = config["Seed:AdminPassword"];
             var adminName = config["Seed:AdminName"] ?? "Admin";
@@ -178,10 +166,6 @@ public static class DbSeeder
         }
     }
 
-    /// <summary>
-    /// Unsplash URLs need width/quality params to avoid 403 from their CDN
-    /// when hotlinked from an app origin.
-    /// </summary>
     private static string UnsplashUrl(string id) =>
         $"https://images.unsplash.com/{id}?auto=format&fit=crop&w=1600&q=80";
 }

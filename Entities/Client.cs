@@ -53,6 +53,17 @@ public class Client
     [Column("bookings_enabled")]
     public bool BookingsEnabled { get; set; } = true;
 
+    // ── NEW: fixed booking window ──────────────────────────────
+    // Mode controls how online customer bookings are gated:
+    //   "rolling" → allow up to MaxAdvanceBookingDays from today
+    //   "fixed"   → allow only dates in [BookingOpenDate, BookingCloseDate]
+    //   "closed"  → reject all online customer bookings
+    // Staff manual bookings bypass this entirely.
+    public string BookingWindowMode { get; set; } = "rolling";
+    public DateTime? BookingOpenDate { get; set; }
+    public DateTime? BookingCloseDate { get; set; }
+    // ───────────────────────────────────────────────────────────
+
     private DateTime _createdAt;
     public DateTime CreatedAt
     {

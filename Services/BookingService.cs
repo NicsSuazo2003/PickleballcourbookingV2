@@ -46,19 +46,67 @@ public class BookingService : IBookingService
     private static string NormalizePhone(string? phone) =>
         Regex.Replace(phone ?? string.Empty, "[^0-9]", "");
 
-    private async Task EnsureWithinAdvanceWindowAsync(Guid clientId, DateTime bookingDate)
+    /// <summary>
+    /// Enforces the booking window for CUSTOMER-FACING bookings.
+    /// Honors three modes on the Client:
+    ///   "rolling" → allow dates up to MaxAdvanceBookingDays from today
+    ///   "fixed"   → allow dates in [BookingOpenDate, BookingCloseDate] (inclusive)
+    ///   "closed"  → reject everything
+    /// Also rejects past dates in all modes.
+    /// </summary>
+    private async Task EnsureWithinBookingWindowAsync(Guid clientId, DateTime bookingDate)
     {
         var client = await _db.Clients.FindAsync(clientId);
         if (client is null) return;
 
-        if (client.MaxAdvanceBookingDays > 0)
-        {
-            var maxDate = DateTime.UtcNow.Date.AddDays(client.MaxAdvanceBookingDays);
-            if (bookingDate.Date > maxDate)
-                throw new InvalidOperationException(
-                    $"Bookings can only be made up to {client.MaxAdvanceBookingDays} days in advance.");
-        }
+        if (bookingDate.Date < DateTime.UtcNow.Date)
+            throw new InvalidOperationException("Cannot book in the past.");
 
+        var mode = (client.BookingWindowMode ?? "rolling").Trim().ToLowerInvariant();
+
+        switch (mode)
+        {
+            case "closed":
+                throw new InvalidOperationException(
+                    "Online bookings are temporarily closed. Please contact the court directly.");
+
+            case "fixed":
+                if (client.BookingOpenDate is null || client.BookingCloseDate is null)
+                    throw new InvalidOperationException(
+                        "Online bookings are not open yet. Please check back later.");
+
+                var open = client.BookingOpenDate.Value.Date;
+                var close = client.BookingCloseDate.Value.Date;
+
+                if (bookingDate.Date < open)
+                    throw new InvalidOperationException(
+                        $"Online bookings open on {open:MMM d, yyyy}. Please pick a date in that range.");
+
+                if (bookingDate.Date > close)
+                    throw new InvalidOperationException(
+                        $"Online bookings for this period closed on {close:MMM d, yyyy}.");
+
+                break;
+
+            case "rolling":
+            default:
+                if (client.MaxAdvanceBookingDays > 0)
+                {
+                    var maxDate = DateTime.UtcNow.Date.AddDays(client.MaxAdvanceBookingDays);
+                    if (bookingDate.Date > maxDate)
+                        throw new InvalidOperationException(
+                            $"Bookings can only be made up to {client.MaxAdvanceBookingDays} days in advance.");
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// For STAFF manual bookings only — only forbids past dates.
+    /// Staff bypass the customer-facing window entirely.
+    /// </summary>
+    private static void EnsureNotPast(DateTime bookingDate)
+    {
         if (bookingDate.Date < DateTime.UtcNow.Date)
             throw new InvalidOperationException("Cannot book in the past.");
     }
@@ -98,7 +146,12 @@ public class BookingService : IBookingService
             throw new InvalidOperationException("Invalid date format");
 
         bookingDate = DateTime.SpecifyKind(bookingDate.Date, DateTimeKind.Utc);
-        await EnsureWithinAdvanceWindowAsync(clientId, bookingDate);
+
+        // ✅ Customer path enforces the window; admin override bypasses it.
+        if (!request.AdminOverride)
+            await EnsureWithinBookingWindowAsync(clientId, bookingDate);
+        else
+            EnsureNotPast(bookingDate);
 
         if (request.CourtGroups == null || request.CourtGroups.Count == 0)
             throw new InvalidOperationException("At least one court must be selected");
@@ -257,7 +310,6 @@ public class BookingService : IBookingService
             await _db.SaveChangesAsync();
             await transaction.CommitAsync();
 
-            // ✅ Security log — after commit, so the booking definitely exists
             await _security.LogAsync(new SecurityEvent
             {
                 ClientId = clientId,
@@ -276,7 +328,6 @@ public class BookingService : IBookingService
                 },
             });
 
-            // Fire-and-forget admin notification
             try
             {
                 var courtIds = booking.Slots.Select(s => s.CourtId!.Value).Distinct().ToList();
@@ -343,7 +394,6 @@ public class BookingService : IBookingService
         if (string.IsNullOrWhiteSpace(referenceCode))
             throw new InvalidOperationException("Reference code is required.");
 
-        // 🔒 Require email — prevents reference-code enumeration
         if (string.IsNullOrWhiteSpace(email))
             throw new UnauthorizedAccessException("Email is required to look up a booking.");
 
@@ -408,15 +458,11 @@ public class BookingService : IBookingService
 
         var previousStatus = booking.Status;
         if (previousStatus == status)
-        {
-            // No-op — don't log or send email
             return MapToDto(booking, booking.Court?.Name ?? "");
-        }
 
         booking.Status = status;
         await _db.SaveChangesAsync();
 
-        // ✅ Security log — after save, using captured previousStatus
         await _security.LogAsync(new SecurityEvent
         {
             ClientId = booking.ClientId,
@@ -452,7 +498,6 @@ public class BookingService : IBookingService
     public async Task<BookingDto> UploadPaymentAsync(
         Guid id, string screenshotBase64, string? paymentReference, Guid clientId)
     {
-        // Deprecated path — delegate to the URL-based one with a data-url.
         return await UploadPaymentScreenshotAsync(
             id,
             string.IsNullOrEmpty(screenshotBase64) ? null : screenshotBase64,
@@ -601,7 +646,7 @@ public class BookingService : IBookingService
     }
 
     // ═══════════════════════════════════════════════════════
-    // STAFF CREATE
+    // STAFF CREATE — bypasses the customer-facing window.
     // ═══════════════════════════════════════════════════════
     public async Task<BookingDto> CreateStaffBookingAsync(StaffCreateBookingRequest request, Guid clientId)
     {
@@ -616,7 +661,9 @@ public class BookingService : IBookingService
             throw new InvalidOperationException("Invalid date format");
 
         bookingDate = DateTime.SpecifyKind(bookingDate.Date, DateTimeKind.Utc);
-        await EnsureWithinAdvanceWindowAsync(clientId, bookingDate);
+
+        // ✅ Staff bookings: only reject past dates. Do NOT enforce the window.
+        EnsureNotPast(bookingDate);
 
         if (request.Slots == null || request.Slots.Count == 0)
             throw new InvalidOperationException("At least one time slot is required");
@@ -665,7 +712,6 @@ public class BookingService : IBookingService
                 status = "confirmed"; paymentMethod = "cash"; expiresAt = null; break;
         }
 
-        // Compute from pricing rules; ignore client-supplied amount unless it came from an admin
         var courtWithRules = await _db.Courts.Include(c => c.PricingRules)
             .FirstAsync(c => c.Id == courtGuid);
         var dateOnly = DateOnly.FromDateTime(bookingDate);
@@ -763,7 +809,9 @@ public class BookingService : IBookingService
                 throw new InvalidOperationException("Invalid date format");
             targetDate = DateTime.SpecifyKind(parsed.Date, DateTimeKind.Utc);
         }
-        await EnsureWithinAdvanceWindowAsync(clientId, targetDate);
+
+        // ✅ Reschedule is a staff action — past-only check, no window enforcement.
+        EnsureNotPast(targetDate);
 
         var newSlots = new List<(TimeOnly Start, TimeOnly End)>();
         foreach (var s in request.Slots)
@@ -890,8 +938,6 @@ public class BookingService : IBookingService
             delta < 0 ? -delta : 0m);
     }
 
-    // ═══════════════════════════════════════════════════════
-    // SUMMARY BY EMAIL
     // ═══════════════════════════════════════════════════════
     // SUMMARY BY EMAIL
     // ═══════════════════════════════════════════════════════

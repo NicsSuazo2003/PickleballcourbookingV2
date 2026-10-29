@@ -97,6 +97,34 @@ public class ClientService : IClientService
 
         if (request.BookingsEnabled is bool b) client.BookingsEnabled = b;
 
+        // ── NEW: fixed booking window validation & persistence ──
+        if (request.BookingWindowMode is not null)
+        {
+            var mode = request.BookingWindowMode.Trim().ToLowerInvariant();
+            if (mode is not ("rolling" or "fixed" or "closed"))
+                throw new ArgumentException("Booking window mode must be 'rolling', 'fixed', or 'closed'.");
+            client.BookingWindowMode = mode;
+        }
+
+        if (request.BookingOpenDate.HasValue)
+            client.BookingOpenDate = DateTime.SpecifyKind(request.BookingOpenDate.Value.Date, DateTimeKind.Utc);
+
+        if (request.BookingCloseDate.HasValue)
+            client.BookingCloseDate = DateTime.SpecifyKind(request.BookingCloseDate.Value.Date, DateTimeKind.Utc);
+
+        // Re-validate after applying changes — the effective state must be consistent
+        if (string.Equals(client.BookingWindowMode, "fixed", StringComparison.OrdinalIgnoreCase))
+        {
+            if (client.BookingOpenDate is null || client.BookingCloseDate is null)
+                throw new ArgumentException(
+                    "Fixed booking window requires both an open date and a close date.");
+
+            if (client.BookingOpenDate.Value.Date > client.BookingCloseDate.Value.Date)
+                throw new ArgumentException(
+                    "Booking open date cannot be after the close date.");
+        }
+        // ─────────────────────────────────────────────────────────
+
         if (request.AvailableAmenities is not null)
         {
             if (request.AvailableAmenities.Count > 30)
@@ -152,6 +180,9 @@ public class ClientService : IClientService
         catch { return null; }
     }
 
+    private static string? DateToString(DateTime? d) =>
+        d.HasValue ? d.Value.ToString("yyyy-MM-dd") : null;
+
     private static ClientAdminDto MapToAdminDto(Client c) => new(
         c.Id.ToString(), c.Name, c.Subdomain, c.LogoUrl,
         c.PrimaryColor, c.AccentColor,
@@ -160,7 +191,10 @@ public class ClientService : IClientService
         (c.AvailableAmenities ?? new List<AmenityItem>())
             .Where(a => !string.IsNullOrEmpty(a.Name))
             .Select(a => new AmenityItemDto(a.Name, a.Icon, a.Description)).ToList(),
-        c.MaxAdvanceBookingDays, c.BookingsEnabled);
+        c.MaxAdvanceBookingDays, c.BookingsEnabled,
+        c.BookingWindowMode ?? "rolling",
+        DateToString(c.BookingOpenDate),
+        DateToString(c.BookingCloseDate));
 
     private static ClientPublicDto MapToPublicDto(Client c) => new(
         c.Id.ToString(), c.Name, c.LogoUrl,
@@ -180,5 +214,8 @@ public class ClientService : IClientService
         (c.AvailableAmenities ?? new List<AmenityItem>())
             .Where(a => !string.IsNullOrEmpty(a.Name))
             .Select(a => new AmenityItemDto(a.Name, a.Icon, a.Description)).ToList(),
-        c.MaxAdvanceBookingDays, c.BookingsEnabled);
+        c.MaxAdvanceBookingDays, c.BookingsEnabled,
+        c.BookingWindowMode ?? "rolling",
+        DateToString(c.BookingOpenDate),
+        DateToString(c.BookingCloseDate));
 }
