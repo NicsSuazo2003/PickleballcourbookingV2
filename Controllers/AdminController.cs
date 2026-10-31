@@ -39,22 +39,49 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// Fast path: middleware (ClientResolver) already resolved ClientId
-    /// and stored it in HttpContext.Items["ClientId"].
-    /// Slow path: resolve the subdomain ourselves and look up the client.
+    /// Resolves the effective client for this request AND (🔒 FIX Bug D)
+    /// verifies it matches the authenticated user's tenant claim.
+    ///
+    /// Threat model: X-Client-Subdomain is user-supplied. An admin of tenant A
+    /// could set it to tenant B and read/write B's data. We reject any request
+    /// where the JWT's client_id does not equal the resolved client.
+    ///
+    /// Exceptions:
+    ///   - Endpoints with no authenticated user (all admin endpoints have [Authorize],
+    ///     so this branch is defensive only).
+    ///   - If the JWT has no client_id claim (legacy token), we still reject on
+    ///     admin endpoints to fail closed.
     /// </summary>
     private async Task<Guid> GetClientId()
     {
-        // Fast path — set by ClientResolver middleware
+        // Resolve tenant from request (header / host / default).
+        Guid resolved;
         if (HttpContext.Items["ClientId"] is Guid cached)
-            return cached;
+        {
+            resolved = cached;
+        }
+        else
+        {
+            var subdomain = ClientResolver.ResolveSubdomain(HttpContext, _config);
+            if (string.IsNullOrEmpty(subdomain))
+                throw new UnauthorizedAccessException("Client identification required");
+            resolved = await _clientService.GetClientIdBySubdomainAsync(subdomain);
+        }
 
-        // Slow path — use static helper (ClientResolver is not DI-injectable anymore)
-        var subdomain = ClientResolver.ResolveSubdomain(HttpContext, _config);
-        if (string.IsNullOrEmpty(subdomain))
-            throw new UnauthorizedAccessException("Client identification required");
+        // 🔒 Tenant consistency check.
+        // Only enforced when the user is authenticated — all controller actions
+        // carry [Authorize], so in practice this always runs.
+        if (User?.Identity?.IsAuthenticated == true)
+        {
+            var claimRaw = User.FindFirstValue("client_id");
+            if (!Guid.TryParse(claimRaw, out var jwtClientId) || jwtClientId != resolved)
+            {
+                // Do NOT leak the mismatched IDs — generic unauthorized is enough.
+                throw new UnauthorizedAccessException("Client identification required");
+            }
+        }
 
-        return await _clientService.GetClientIdBySubdomainAsync(subdomain);
+        return resolved;
     }
 
     private Guid ActingUserId()
@@ -184,14 +211,15 @@ public class AdminController : ControllerBase
     [Authorize(Roles = "admin")]
     public async Task<ActionResult<ClientAdminDto>> GetSettings()
     {
-        // Fast path — subdomain resolved by middleware
-        var subdomain = HttpContext.Items["Subdomain"] as string;
-
-        // Slow path — resolve manually
+        // 🔒 FIX (Bug D): same tenant consistency guard as GetClientId().
+        var subdomain = HttpContext.Items["Subdomain"] as string
+                        ?? ClientResolver.ResolveSubdomain(HttpContext, _config);
         if (string.IsNullOrEmpty(subdomain))
-            subdomain = ClientResolver.ResolveSubdomain(HttpContext, _config);
+            throw new UnauthorizedAccessException("Client identification required");
 
-        if (string.IsNullOrEmpty(subdomain))
+        var clientId = await _clientService.GetClientIdBySubdomainAsync(subdomain);
+        var claimRaw = User.FindFirstValue("client_id");
+        if (!Guid.TryParse(claimRaw, out var jwtClientId) || jwtClientId != clientId)
             throw new UnauthorizedAccessException("Client identification required");
 
         var client = await _clientService.GetClientAdminBySubdomainAsync(subdomain);

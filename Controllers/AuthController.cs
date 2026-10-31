@@ -73,6 +73,12 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("auth")]
     public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
     {
+        // 🔒 FIX (Bug A): actually reset the password.
+        // The service validates the token hash + expiry and throws
+        // InvalidOperationException on any failure — ExceptionMiddleware
+        // maps that to 409 { message }, which the frontend surfaces via
+        // ApiError.userMessage.
+        await _auth.ResetPasswordAsync(request.Token, request.NewPassword);
         return Ok(new { message = "Password reset successfully" });
     }
 
