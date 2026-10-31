@@ -1,9 +1,10 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.HttpOverrides;          // ✅ NEW
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -53,20 +54,87 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
-// ─── ForwardedHeaders: trust X-Forwarded-For from Render's edge ───
-//     MUST be configured here and used in the pipeline BEFORE any
-//     component that reads HttpContext.Connection.RemoteIpAddress
-//     (RateLimiter, ClientResolver, SecurityLogger, etc.).
+// ─── ForwardedHeaders ─────────────────────────────────────
+//   Only the PROTOCOL is handled here. The client IP is resolved by the
+//   RealClientIp middleware below, because ASP.NET's X-Forwarded-For handling
+//   (ForwardLimit = 1) only strips one proxy hop and was leaving us with
+//   Render's internal 10.x.x.x addresses.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders =
-        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-
-    // Render terminates at Cloudflare, then its own internal proxy.
-    // Clear the default trust list (127.0.0.1 only) so those proxies are trusted.
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
+
+// ─── Real client IP resolution ────────────────────────────
+static bool IsNonPublic(IPAddress ip)
+{
+    if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+    if (IPAddress.IsLoopback(ip)) return true;
+
+    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || (ip.GetAddressBytes()[0] & 0xFE) == 0xFC;
+
+    var b = ip.GetAddressBytes();
+    return b[0] == 0
+        || b[0] == 10
+        || (b[0] == 172 && b[1] is >= 16 and <= 31)
+        || (b[0] == 192 && b[1] == 168)
+        || (b[0] == 169 && b[1] == 254)
+        || (b[0] == 100 && b[1] is >= 64 and <= 127);
+}
+
+// Order of trust:
+//  1. CF-Connecting-IP / True-Client-IP — set (and overwritten) by Cloudflare, which
+//     fronts Render. Clients cannot forge these when going through Cloudflare.
+//  2. Rightmost PUBLIC entry of X-Forwarded-For (proxies append on the right, so a
+//     client can only add fake entries on the LEFT; we never trust the leftmost).
+//  3. Otherwise leave the socket address untouched.
+static IPAddress? ResolveClientIp(HttpContext ctx)
+{
+    foreach (var name in new[] { "CF-Connecting-IP", "True-Client-IP" })
+    {
+        var v = ctx.Request.Headers[name].FirstOrDefault()?.Trim();
+        if (v is not null && IPAddress.TryParse(v, out var ip) && !IsNonPublic(ip))
+            return ip;
+    }
+
+    var xff = ctx.Request.Headers["X-Forwarded-For"].ToString();
+    if (!string.IsNullOrWhiteSpace(xff))
+    {
+        var parts = xff.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (int i = parts.Length - 1; i >= 0; i--)
+        {
+            if (IPAddress.TryParse(parts[i], out var ip) && !IsNonPublic(ip))
+                return ip;
+        }
+    }
+
+    return null;
+}
+
+// ─── Rate-limit rejection log gate (1 DB row per IP per 5 min) ───
+var rejectionLogGate = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTime>();
+
+static bool ShouldLogRejection(
+    System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> gate,
+    string key,
+    TimeSpan window)
+{
+    if (gate.Count > 10_000) gate.Clear();
+
+    var now = DateTime.UtcNow;
+    while (true)
+    {
+        if (!gate.TryGetValue(key, out var last))
+        {
+            if (gate.TryAdd(key, now)) return true;
+            continue;
+        }
+        if (now - last < window) return false;
+        if (gate.TryUpdate(key, now, last)) return true;
+    }
+}
 
 // ─── Typed HTTP clients ───────────────────────────────────
 builder.Services.AddHttpClient("supabase", c => { c.Timeout = TimeSpan.FromSeconds(20); });
@@ -113,23 +181,26 @@ builder.Services.AddRateLimiter(options =>
             });
     });
 
+    // Per real visitor now (not per proxy). 10 allows a shared venue wifi / NAT
+    // without letting one visitor spam booking creation.
     options.AddPolicy("booking", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"booking-create:{ClientIp(ctx)}",
             factory: _ => new SlidingWindowRateLimiterOptions
             {
-                PermitLimit = 3,
+                PermitLimit = 10,
                 Window = TimeSpan.FromMinutes(10),
                 SegmentsPerWindow = 10,
                 QueueLimit = 0,
             }));
 
+    // 10 attempts / 15 min per visitor (was 5, which locked out typos)
     options.AddPolicy("auth", ctx =>
         RateLimitPartition.GetSlidingWindowLimiter(
             partitionKey: $"auth:{ClientIp(ctx)}",
             factory: _ => new SlidingWindowRateLimiterOptions
             {
-                PermitLimit = 5,
+                PermitLimit = 10,
                 Window = TimeSpan.FromMinutes(15),
                 SegmentsPerWindow = 15,
                 QueueLimit = 0,
@@ -170,30 +241,34 @@ builder.Services.AddRateLimiter(options =>
 
     options.OnRejected = async (ctx, token) =>
     {
+        var http = ctx.HttpContext;
+
         try
         {
-            var clientId = ctx.HttpContext.Items["ClientId"] as Guid?;
-            if (clientId is Guid cid)
+            var ip = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            // At most one DB row per IP per 5 minutes
+            if (http.Items["ClientId"] is Guid cid &&
+                ShouldLogRejection(rejectionLogGate, ip, TimeSpan.FromMinutes(5)))
             {
-                var secLogger = ctx.HttpContext.RequestServices.GetService<ISecurityLogger>();
+                var secLogger = http.RequestServices.GetService<ISecurityLogger>();
                 if (secLogger is not null)
                 {
-                    var ip = ctx.HttpContext.Connection.RemoteIpAddress?.ToString();
-                    var ua = ctx.HttpContext.Request.Headers["User-Agent"].FirstOrDefault();
+                    var ua = http.Request.Headers["User-Agent"].FirstOrDefault();
 
                     await secLogger.LogAsync(new SecurityEvent
                     {
                         ClientId = cid,
                         IpHash = secLogger.HashIp(ip),
-                        IpAddress = ip,
+                        IpAddress = ip == "unknown" ? null : ip,
                         UserAgent = ua,
                         EventType = "rate_limit.triggered",
                         Severity = "warning",
-                        Message = $"Rate limit hit on {ctx.HttpContext.Request.Method} {ctx.HttpContext.Request.Path}",
+                        Message = $"Rate limit hit on {http.Request.Method} {http.Request.Path} (sampled: 1 per 5 min per IP)",
                         Metadata = new
                         {
-                            path = ctx.HttpContext.Request.Path.Value,
-                            method = ctx.HttpContext.Request.Method,
+                            path = http.Request.Path.Value,
+                            method = http.Request.Method,
                         },
                         Success = false,
                         ErrorCode = "429",
@@ -203,9 +278,10 @@ builder.Services.AddRateLimiter(options =>
         }
         catch { }
 
-        ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-        ctx.HttpContext.Response.ContentType = "application/json";
-        await ctx.HttpContext.Response.WriteAsync(
+        http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        http.Response.Headers.RetryAfter = "60";
+        http.Response.ContentType = "application/json";
+        await http.Response.WriteAsync(
             """{"message":"Too many requests. Please slow down and try again shortly."}""",
             token);
     };
@@ -287,9 +363,17 @@ _ = Task.Run(async () =>
 
 // ─── Pipeline ────────────────────────────────────────────
 
-// ✅ MUST be first — rewrites RemoteIpAddress to the real client IP
-//    before anything (ClientResolver, RateLimiter, SecurityLogger) reads it.
+// Protocol (http/https) from X-Forwarded-Proto
 app.UseForwardedHeaders();
+
+// ✅ Rewrites RemoteIpAddress to the real visitor IP BEFORE ClientResolver,
+//    RateLimiter, controllers and SecurityLogger read it.
+app.Use(async (ctx, next) =>
+{
+    var real = ResolveClientIp(ctx);
+    if (real is not null) ctx.Connection.RemoteIpAddress = real;
+    await next();
+});
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();
@@ -317,5 +401,15 @@ app.MapHealthChecks("/health", new HealthCheckOptions
         await context.Response.WriteAsync("{\"status\":\"healthy\"}");
     }
 });
+
+// ─── TEMPORARY — delete after verifying the real-IP fix ───
+app.MapGet("/debug/ip", (HttpContext c) => Results.Json(new
+{
+    resolved = c.Connection.RemoteIpAddress?.ToString(),
+    xff = c.Request.Headers["X-Forwarded-For"].ToString(),
+    cf = c.Request.Headers["CF-Connecting-IP"].ToString(),
+    trueClient = c.Request.Headers["True-Client-IP"].ToString(),
+    realIp = c.Request.Headers["X-Real-IP"].ToString(),
+}));
 
 app.Run();
